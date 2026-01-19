@@ -17,4 +17,4 @@ pub use types::{PostgresType, RustType};
 pub use validate::validate_query;
 
 #[cfg(feature = "runtime")]
-pub use runtime::Query;
+pub use runtime::{Query, QueryWithParams};

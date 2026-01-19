@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/sql-check",
     "crates/sql-check-macros",
+    "crates/sql-check-tests",
     # Temporarily exclude sample-app because SQLx needs a live database
     # "examples/sample-app",
 ]

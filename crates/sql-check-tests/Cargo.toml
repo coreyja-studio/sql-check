@@ -1,0 +1,16 @@
+[package]
+name = "sql-check-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sql-check = { path = "../sql-check", features = ["runtime"] }
+sql-check-macros = { path = "../sql-check-macros" }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Types that the generated code may use
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+serde_json = "1"
+rust_decimal = "1"
