@@ -216,9 +216,7 @@ fn resolve_table_factor(
                 ctx.left_joined_tables.push(alias_name.to_lowercase());
             }
         }
-        TableFactor::Derived {
-            alias: Some(a), ..
-        } => {
+        TableFactor::Derived { alias: Some(a), .. } => {
             // Subquery - for now, just track the alias
             // We can't easily resolve subquery columns, so mark as custom
             ctx.table_aliases
