@@ -27,19 +27,16 @@ impl Schema {
     /// Parse schema from SQL DDL statements (like pg_dump output).
     pub fn from_sql(sql: &str) -> Result<Self> {
         let dialect = PostgreSqlDialect {};
-        let statements = Parser::parse_sql(&dialect, sql)
-            .map_err(|e| Error::SchemaParse(e.to_string()))?;
+        let statements =
+            Parser::parse_sql(&dialect, sql).map_err(|e| Error::SchemaParse(e.to_string()))?;
 
         let mut schema = Schema::new();
 
         for statement in statements {
-            match statement {
-                Statement::CreateTable(create) => {
-                    let table = Table::from_create_table(&create)?;
-                    schema.tables.insert(table.name.clone(), table);
-                }
-                // We can add support for CREATE INDEX, CREATE TYPE, etc. later
-                _ => {}
+            // We can add support for CREATE INDEX, CREATE TYPE, etc. later
+            if let Statement::CreateTable(create) = statement {
+                let table = Table::from_create_table(&create)?;
+                schema.tables.insert(table.name.clone(), table);
             }
         }
 

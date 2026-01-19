@@ -105,9 +105,12 @@ pub fn query(input: TokenStream) -> TokenStream {
     let result = match validate_query(&schema, &sql) {
         Ok(r) => r,
         Err(e) => {
-            return syn::Error::new_spanned(query_input.sql, format!("SQL validation error: {}", e))
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(
+                query_input.sql,
+                format!("SQL validation error: {}", e),
+            )
+            .to_compile_error()
+            .into();
         }
     };
 
@@ -158,7 +161,11 @@ fn count_placeholders(sql: &str) -> usize {
 }
 
 /// Generate the code for a validated query.
-fn generate_query_code(sql: &str, result: &sql_check::validate::QueryResult, params: &[Expr]) -> TokenStream2 {
+fn generate_query_code(
+    sql: &str,
+    result: &sql_check::validate::QueryResult,
+    params: &[Expr],
+) -> TokenStream2 {
     // Generate field definitions for the result struct
     let fields: Vec<TokenStream2> = result
         .columns

@@ -11,12 +11,13 @@ use tokio_postgres::NoTls;
 
 /// Helper to connect to the test database.
 async fn connect() -> tokio_postgres::Client {
-    let (client, connection) = tokio_postgres::connect(
-        "host=/var/run/postgresql dbname=sql_check_test",
-        NoTls,
-    )
-    .await
-    .expect("Failed to connect to database");
+    // Use DATABASE_URL env var if set (for CI), otherwise use local socket
+    let connection_string = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "host=/var/run/postgresql dbname=sql_check_test".to_string());
+
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+        .await
+        .expect("Failed to connect to database");
 
     // Spawn the connection handler
     tokio::spawn(async move {
@@ -33,10 +34,7 @@ async fn test_insert_and_select_user() {
     let client = connect().await;
 
     // Clean up any existing test data
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     // Insert a user
@@ -54,7 +52,10 @@ async fn test_insert_and_select_user() {
         .unwrap();
 
     // Query the user back using our macro
-    let q = query!("SELECT id, name, email, metadata FROM users WHERE id = $1", user_id);
+    let q = query!(
+        "SELECT id, name, email, metadata FROM users WHERE id = $1",
+        user_id
+    );
     let user = q.fetch_one(&client).await.unwrap();
 
     assert_eq!(user.id, user_id);
@@ -117,10 +118,7 @@ async fn test_left_join_with_nullable() {
     let client = connect().await;
 
     // Clean up
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     // Insert user without profile
@@ -169,10 +167,7 @@ async fn test_fetch_optional() {
     let client = connect().await;
 
     // Clean up
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     let nonexistent_id = uuid::Uuid::new_v4();
