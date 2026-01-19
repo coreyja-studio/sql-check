@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sql_check_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Load schema into test database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d sql_check_test -f examples/sample-app/schema.sql
+
+      - name: Run tests
+        run: cargo test --workspace -- --test-threads=1
+        env:
+          DATABASE_URL: "host=localhost user=postgres password=postgres dbname=sql_check_test"

@@ -11,12 +11,13 @@ use tokio_postgres::NoTls;
 
 /// Helper to connect to the test database.
 async fn connect() -> tokio_postgres::Client {
-    let (client, connection) = tokio_postgres::connect(
-        "host=/var/run/postgresql dbname=sql_check_test",
-        NoTls,
-    )
-    .await
-    .expect("Failed to connect to database");
+    // Use DATABASE_URL env var if set (for CI), otherwise use local socket
+    let connection_string = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "host=/var/run/postgresql dbname=sql_check_test".to_string());
+
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+        .await
+        .expect("Failed to connect to database");
 
     // Spawn the connection handler
     tokio::spawn(async move {
