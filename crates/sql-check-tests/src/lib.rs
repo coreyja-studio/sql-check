@@ -18,7 +18,10 @@ fn test_basic_select() {
 #[test]
 fn test_select_all_user_columns() {
     let q = query!("SELECT id, name, email, metadata, created_at FROM users");
-    assert_eq!(q.sql(), "SELECT id, name, email, metadata, created_at FROM users");
+    assert_eq!(
+        q.sql(),
+        "SELECT id, name, email, metadata, created_at FROM users"
+    );
 }
 
 /// Test SELECT from profiles table with nullable columns.
@@ -31,7 +34,8 @@ fn test_select_nullable_columns() {
 /// Test LEFT JOIN makes columns nullable.
 #[test]
 fn test_left_join_nullability() {
-    let q = query!("SELECT u.id, u.name, p.bio FROM users u LEFT JOIN profiles p ON p.user_id = u.id");
+    let q =
+        query!("SELECT u.id, u.name, p.bio FROM users u LEFT JOIN profiles p ON p.user_id = u.id");
     assert_eq!(
         q.sql(),
         "SELECT u.id, u.name, p.bio FROM users u LEFT JOIN profiles p ON p.user_id = u.id"
@@ -51,8 +55,15 @@ fn test_query_with_one_param() {
 fn test_query_with_multiple_params() {
     let name = "Alice".to_string();
     let email = "alice@example.com".to_string();
-    let q = query!("SELECT id FROM users WHERE name = $1 AND email = $2", name, email);
-    assert_eq!(q.sql(), "SELECT id FROM users WHERE name = $1 AND email = $2");
+    let q = query!(
+        "SELECT id FROM users WHERE name = $1 AND email = $2",
+        name,
+        email
+    );
+    assert_eq!(
+        q.sql(),
+        "SELECT id FROM users WHERE name = $1 AND email = $2"
+    );
 }
 
 // NOTE: To verify compile-time errors work, uncomment one of these:

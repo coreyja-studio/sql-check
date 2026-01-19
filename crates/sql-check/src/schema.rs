@@ -27,8 +27,8 @@ impl Schema {
     /// Parse schema from SQL DDL statements (like pg_dump output).
     pub fn from_sql(sql: &str) -> Result<Self> {
         let dialect = PostgreSqlDialect {};
-        let statements = Parser::parse_sql(&dialect, sql)
-            .map_err(|e| Error::SchemaParse(e.to_string()))?;
+        let statements =
+            Parser::parse_sql(&dialect, sql).map_err(|e| Error::SchemaParse(e.to_string()))?;
 
         let mut schema = Schema::new();
 

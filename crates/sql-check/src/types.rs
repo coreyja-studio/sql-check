@@ -6,12 +6,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PostgresType {
     // Numeric types
-    SmallInt,     // int2
-    Integer,      // int4
-    BigInt,       // int8
-    Real,         // float4
+    SmallInt,        // int2
+    Integer,         // int4
+    BigInt,          // int8
+    Real,            // float4
     DoublePrecision, // float8
-    Numeric,      // numeric/decimal
+    Numeric,         // numeric/decimal
 
     // Character types
     Text,

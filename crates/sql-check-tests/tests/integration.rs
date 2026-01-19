@@ -34,10 +34,7 @@ async fn test_insert_and_select_user() {
     let client = connect().await;
 
     // Clean up any existing test data
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     // Insert a user
@@ -55,7 +52,10 @@ async fn test_insert_and_select_user() {
         .unwrap();
 
     // Query the user back using our macro
-    let q = query!("SELECT id, name, email, metadata FROM users WHERE id = $1", user_id);
+    let q = query!(
+        "SELECT id, name, email, metadata FROM users WHERE id = $1",
+        user_id
+    );
     let user = q.fetch_one(&client).await.unwrap();
 
     assert_eq!(user.id, user_id);
@@ -118,10 +118,7 @@ async fn test_left_join_with_nullable() {
     let client = connect().await;
 
     // Clean up
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     // Insert user without profile
@@ -170,10 +167,7 @@ async fn test_fetch_optional() {
     let client = connect().await;
 
     // Clean up
-    client
-        .execute("DELETE FROM profiles", &[])
-        .await
-        .unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
 
     let nonexistent_id = uuid::Uuid::new_v4();

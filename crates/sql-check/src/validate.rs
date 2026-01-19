@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::schema::Schema;
 use crate::types::RustType;
 use sqlparser::ast::{
-    Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select, SelectItem, SetExpr,
-    Statement, TableFactor, TableWithJoins, JoinOperator, Value,
+    Expr, FunctionArg, FunctionArgExpr, FunctionArguments, JoinOperator, Query, Select, SelectItem,
+    SetExpr, Statement, TableFactor, TableWithJoins, Value,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -27,8 +27,8 @@ pub struct QueryColumn {
 /// Validate a query against a schema and return the inferred types.
 pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
     let dialect = PostgreSqlDialect {};
-    let statements = Parser::parse_sql(&dialect, sql)
-        .map_err(|e| Error::QueryParse(e.to_string()))?;
+    let statements =
+        Parser::parse_sql(&dialect, sql).map_err(|e| Error::QueryParse(e.to_string()))?;
 
     if statements.len() != 1 {
         return Err(Error::InvalidQuery(
@@ -56,9 +56,9 @@ struct ResolveContext {
 
 impl ResolveContext {
     fn is_nullable_table(&self, table: &str) -> bool {
-        self.left_joined_tables.iter().any(|t| {
-            t.eq_ignore_ascii_case(table)
-        })
+        self.left_joined_tables
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(table))
     }
 }
 
@@ -100,9 +100,9 @@ fn validate_select_body(schema: &Schema, select: &Select) -> Result<QueryResult>
             SelectItem::Wildcard(_) => {
                 // For *, we need to add all columns from all tables
                 for (alias, table_name) in &ctx.table_aliases {
-                    let table = schema.get_table(table_name).ok_or_else(|| {
-                        Error::UnknownTable(table_name.clone())
-                    })?;
+                    let table = schema
+                        .get_table(table_name)
+                        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
 
                     for col in &table.columns {
                         let mut rust_type = col.data_type.to_rust_type();
@@ -120,23 +120,29 @@ fn validate_select_body(schema: &Schema, select: &Select) -> Result<QueryResult>
                 // For table.*, add all columns from that table
                 use sqlparser::ast::SelectItemQualifiedWildcardKind;
                 let table_alias = match kind {
-                    SelectItemQualifiedWildcardKind::ObjectName(obj_name) => {
-                        obj_name.0.first()
-                            .and_then(|part| part.as_ident())
-                            .map(|i| i.value.clone())
-                            .ok_or_else(|| Error::InvalidQuery("Empty qualified wildcard".to_string()))?
-                    }
+                    SelectItemQualifiedWildcardKind::ObjectName(obj_name) => obj_name
+                        .0
+                        .first()
+                        .and_then(|part| part.as_ident())
+                        .map(|i| i.value.clone())
+                        .ok_or_else(|| {
+                            Error::InvalidQuery("Empty qualified wildcard".to_string())
+                        })?,
                     SelectItemQualifiedWildcardKind::Expr(_) => {
-                        return Err(Error::InvalidQuery("Expression wildcards not supported".to_string()));
+                        return Err(Error::InvalidQuery(
+                            "Expression wildcards not supported".to_string(),
+                        ));
                     }
                 };
 
-                let table_name = ctx.table_aliases.get(&table_alias.to_lowercase())
+                let table_name = ctx
+                    .table_aliases
+                    .get(&table_alias.to_lowercase())
                     .ok_or_else(|| Error::UnknownTable(table_alias.clone()))?;
 
-                let table = schema.get_table(table_name).ok_or_else(|| {
-                    Error::UnknownTable(table_name.clone())
-                })?;
+                let table = schema
+                    .get_table(table_name)
+                    .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
 
                 for col in &table.columns {
                     let mut rust_type = col.data_type.to_rust_type();
@@ -185,7 +191,9 @@ fn resolve_table_factor(
 ) -> Result<()> {
     match factor {
         TableFactor::Table { name, alias, .. } => {
-            let table_name = name.0.last()
+            let table_name = name
+                .0
+                .last()
                 .and_then(|part| part.as_ident())
                 .map(|i| i.value.clone())
                 .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?;
@@ -201,7 +209,8 @@ fn resolve_table_factor(
                 .map(|a| a.name.value.clone())
                 .unwrap_or_else(|| table_name.clone());
 
-            ctx.table_aliases.insert(alias_name.to_lowercase(), table_name.clone());
+            ctx.table_aliases
+                .insert(alias_name.to_lowercase(), table_name.clone());
 
             if is_left_joined {
                 ctx.left_joined_tables.push(alias_name.to_lowercase());
@@ -211,7 +220,8 @@ fn resolve_table_factor(
             // Subquery - for now, just track the alias
             if let Some(a) = alias {
                 // We can't easily resolve subquery columns, so mark as custom
-                ctx.table_aliases.insert(a.name.value.to_lowercase(), "_subquery".to_string());
+                ctx.table_aliases
+                    .insert(a.name.value.to_lowercase(), "_subquery".to_string());
             }
         }
         _ => {
@@ -253,14 +263,17 @@ fn infer_expr_type(
             let table_alias = &idents[0].value;
             let col_name = &idents[1].value;
 
-            let table_name = ctx.table_aliases
+            let table_name = ctx
+                .table_aliases
                 .get(&table_alias.to_lowercase())
                 .ok_or_else(|| Error::UnknownTable(table_alias.clone()))?;
 
-            let table = schema.get_table(table_name)
+            let table = schema
+                .get_table(table_name)
                 .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
 
-            let col = table.get_column(col_name)
+            let col = table
+                .get_column(col_name)
                 .ok_or_else(|| Error::UnknownColumn {
                     table: table_name.clone(),
                     column: col_name.clone(),
@@ -275,7 +288,10 @@ fn infer_expr_type(
         }
         Expr::Function(func) => {
             // Handle aggregate functions
-            let func_name = func.name.0.last()
+            let func_name = func
+                .name
+                .0
+                .last()
                 .and_then(|part| part.as_ident())
                 .map(|i| i.value.to_lowercase())
                 .unwrap_or_default();
@@ -330,11 +346,12 @@ fn infer_expr_type(
             };
             Ok(("?column?".to_string(), rust_type))
         }
-        Expr::Cast { expr, data_type, .. } => {
+        Expr::Cast {
+            expr, data_type, ..
+        } => {
             // CAST changes the type
-            let rust_type = crate::types::PostgresType::from_sql_name(
-                &format!("{}", data_type)
-            ).to_rust_type();
+            let rust_type =
+                crate::types::PostgresType::from_sql_name(&format!("{}", data_type)).to_rust_type();
             let (name, _) = infer_expr_type(schema, ctx, expr)?;
             Ok((name, rust_type))
         }
@@ -399,14 +416,12 @@ fn find_column_in_tables<'a>(
 }
 
 /// Validate an INSERT statement.
-fn validate_insert(
-    schema: &Schema,
-    insert: &sqlparser::ast::Insert,
-) -> Result<QueryResult> {
+fn validate_insert(schema: &Schema, insert: &sqlparser::ast::Insert) -> Result<QueryResult> {
     let table_name = insert.table.to_string();
 
     // Verify table exists
-    let table = schema.get_table(&table_name)
+    let table = schema
+        .get_table(&table_name)
         .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
 
     // Verify columns exist
@@ -423,7 +438,8 @@ fn validate_insert(
     // If there's a RETURNING clause, infer those types
     if let Some(returning) = &insert.returning {
         let mut ctx = ResolveContext::default();
-        ctx.table_aliases.insert(table_name.to_lowercase(), table_name.clone());
+        ctx.table_aliases
+            .insert(table_name.to_lowercase(), table_name.clone());
 
         let mut columns = Vec::new();
         for item in returning {
@@ -504,10 +520,8 @@ mod tests {
     #[test]
     fn test_validate_select_with_alias() {
         let schema = test_schema();
-        let result = validate_query(
-            &schema,
-            "SELECT u.id, u.name as user_name FROM users u"
-        ).unwrap();
+        let result =
+            validate_query(&schema, "SELECT u.id, u.name as user_name FROM users u").unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "id");
@@ -523,8 +537,9 @@ mod tests {
             SELECT u.id, u.name, p.bio
             FROM users u
             LEFT JOIN profiles p ON p.user_id = u.id
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 3);
         // u.id - not nullable (from users, not left-joined)
@@ -550,10 +565,7 @@ mod tests {
     #[test]
     fn test_validate_jsonb_column() {
         let schema = test_schema();
-        let result = validate_query(
-            &schema,
-            "SELECT id, metadata FROM users"
-        ).unwrap();
+        let result = validate_query(&schema, "SELECT id, metadata FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[1].name, "metadata");
