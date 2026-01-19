@@ -62,7 +62,10 @@ impl<T> Query<T> {
     }
 
     /// Execute the query without returning results (for INSERT/UPDATE/DELETE).
-    pub async fn execute(&self, client: &tokio_postgres::Client) -> Result<u64, tokio_postgres::Error> {
+    pub async fn execute(
+        &self,
+        client: &tokio_postgres::Client,
+    ) -> Result<u64, tokio_postgres::Error> {
         client.execute(&self.sql, &[]).await
     }
 }
@@ -106,7 +109,10 @@ impl<T, P: ToSql + Sync> BoundQuery<T, P> {
     }
 
     /// Execute the query without returning results (for INSERT/UPDATE/DELETE).
-    pub async fn execute(&self, client: &tokio_postgres::Client) -> Result<u64, tokio_postgres::Error> {
+    pub async fn execute(
+        &self,
+        client: &tokio_postgres::Client,
+    ) -> Result<u64, tokio_postgres::Error> {
         let params: Vec<&(dyn ToSql + Sync)> = self.params.iter().map(|p| p as _).collect();
         client.execute(&self.sql, &params).await
     }
@@ -169,7 +175,10 @@ impl<'a, T> QueryWithParams<'a, T> {
     }
 
     /// Execute the query without returning results (for INSERT/UPDATE/DELETE).
-    pub async fn execute(&self, client: &tokio_postgres::Client) -> Result<u64, tokio_postgres::Error> {
+    pub async fn execute(
+        &self,
+        client: &tokio_postgres::Client,
+    ) -> Result<u64, tokio_postgres::Error> {
         client.execute(&self.sql, &self.params).await
     }
 }

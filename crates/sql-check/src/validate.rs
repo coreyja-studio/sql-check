@@ -39,7 +39,9 @@ pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
     match &statements[0] {
         Statement::Query(query) => validate_select(schema, query),
         Statement::Insert(insert) => validate_insert(schema, insert),
-        Statement::Update(update) => validate_update(schema, &update.table, update.returning.as_deref()),
+        Statement::Update(update) => {
+            validate_update(schema, &update.table, update.returning.as_deref())
+        }
         Statement::Delete(delete) => validate_delete(schema, delete),
         _ => Err(Error::InvalidQuery(
             "Only SELECT, INSERT, UPDATE, and DELETE are supported".to_string(),
@@ -493,7 +495,11 @@ fn validate_update(
             .and_then(|part| part.as_ident())
             .map(|i| i.value.clone())
             .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?,
-        _ => return Err(Error::InvalidQuery("Unsupported table factor in UPDATE".to_string())),
+        _ => {
+            return Err(Error::InvalidQuery(
+                "Unsupported table factor in UPDATE".to_string(),
+            ))
+        }
     };
 
     // Verify table exists
@@ -565,7 +571,11 @@ fn validate_delete(schema: &Schema, delete: &sqlparser::ast::Delete) -> Result<Q
             .and_then(|part| part.as_ident())
             .map(|i| i.value.clone())
             .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?,
-        _ => return Err(Error::InvalidQuery("Unsupported table factor in DELETE".to_string())),
+        _ => {
+            return Err(Error::InvalidQuery(
+                "Unsupported table factor in DELETE".to_string(),
+            ))
+        }
     };
 
     // Verify table exists
