@@ -2,6 +2,8 @@
 //!
 //! Uncomment one of the test bodies to verify it fails.
 
+// Import kept for when tests are uncommented
+#[allow(unused_imports)]
 use sql_check_macros::query;
 
 #[test]

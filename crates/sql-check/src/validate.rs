@@ -216,13 +216,16 @@ fn resolve_table_factor(
                 ctx.left_joined_tables.push(alias_name.to_lowercase());
             }
         }
-        TableFactor::Derived { alias, .. } => {
+        TableFactor::Derived {
+            alias: Some(a), ..
+        } => {
             // Subquery - for now, just track the alias
-            if let Some(a) = alias {
-                // We can't easily resolve subquery columns, so mark as custom
-                ctx.table_aliases
-                    .insert(a.name.value.to_lowercase(), "_subquery".to_string());
-            }
+            // We can't easily resolve subquery columns, so mark as custom
+            ctx.table_aliases
+                .insert(a.name.value.to_lowercase(), "_subquery".to_string());
+        }
+        TableFactor::Derived { alias: None, .. } => {
+            // Subquery without alias - nothing to track
         }
         _ => {
             // Other table factors (UNNEST, etc.) - skip for now
@@ -378,11 +381,9 @@ fn get_first_arg_type(
 ) -> Result<Option<RustType>> {
     match args {
         FunctionArguments::List(list) => {
-            if let Some(arg) = list.args.first() {
-                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg {
-                    let (_, inner_type) = infer_expr_type(schema, ctx, e)?;
-                    return Ok(Some(inner_type));
-                }
+            if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(e))) = list.args.first() {
+                let (_, inner_type) = infer_expr_type(schema, ctx, e)?;
+                return Ok(Some(inner_type));
             }
             Ok(None)
         }

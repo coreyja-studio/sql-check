@@ -2,6 +2,8 @@
 //!
 //! These tests verify the query! macro generates valid, compilable code.
 
+// The query! macro is used in tests below, but clippy doesn't see proc macro usage
+#[allow(unused_imports)]
 use sql_check_macros::query;
 
 /// Test basic SELECT query generates a typed result.

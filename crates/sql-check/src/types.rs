@@ -58,8 +58,8 @@ impl PostgresType {
         let name_lower = name_lower.trim();
 
         // Handle array types first
-        if name_lower.ends_with("[]") {
-            let element_type = Self::from_sql_name(&name_lower[..name_lower.len() - 2]);
+        if let Some(base) = name_lower.strip_suffix("[]") {
+            let element_type = Self::from_sql_name(base);
             return PostgresType::Array(Box::new(element_type));
         }
 
@@ -69,7 +69,7 @@ impl PostgresType {
             return PostgresType::Array(Box::new(element_type));
         }
 
-        match &*name_lower {
+        match name_lower {
             // Numeric
             "smallint" | "int2" => PostgresType::SmallInt,
             "integer" | "int" | "int4" => PostgresType::Integer,

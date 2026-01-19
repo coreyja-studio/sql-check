@@ -33,13 +33,10 @@ impl Schema {
         let mut schema = Schema::new();
 
         for statement in statements {
-            match statement {
-                Statement::CreateTable(create) => {
-                    let table = Table::from_create_table(&create)?;
-                    schema.tables.insert(table.name.clone(), table);
-                }
-                // We can add support for CREATE INDEX, CREATE TYPE, etc. later
-                _ => {}
+            // We can add support for CREATE INDEX, CREATE TYPE, etc. later
+            if let Statement::CreateTable(create) = statement {
+                let table = Table::from_create_table(&create)?;
+                schema.tables.insert(table.name.clone(), table);
             }
         }
 
