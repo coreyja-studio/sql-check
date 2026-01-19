@@ -437,6 +437,9 @@ fn generate_sqlx_query_code(
 
     quote! {
         {
+            // Import Row trait to enable .get() method on PgRow
+            use ::sqlx::Row as _;
+
             #[derive(Debug, Clone)]
             pub struct #struct_name {
                 #(#fields),*
