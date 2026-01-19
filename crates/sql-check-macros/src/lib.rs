@@ -413,14 +413,15 @@ fn generate_sqlx_query_code(
         })
         .collect();
 
-    // Generate the row mapping code using sqlx::Row::get
+    // Generate the row mapping code using sqlx Row::get method
+    // We use method syntax (row.get) rather than trait syntax because row is &PgRow
     let field_mappings: Vec<TokenStream2> = result
         .columns
         .iter()
         .enumerate()
         .map(|(idx, col)| {
             let name = format_ident!("{}", sanitize_field_name(&col.name));
-            quote! { #name: ::sqlx::Row::get(&row, #idx) }
+            quote! { #name: row.get(#idx) }
         })
         .collect();
 
