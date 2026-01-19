@@ -39,8 +39,10 @@ pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
     match &statements[0] {
         Statement::Query(query) => validate_select(schema, query),
         Statement::Insert(insert) => validate_insert(schema, insert),
+        Statement::Update(update) => validate_update(schema, &update.table, update.returning.as_deref()),
+        Statement::Delete(delete) => validate_delete(schema, delete),
         _ => Err(Error::InvalidQuery(
-            "Only SELECT and INSERT are supported".to_string(),
+            "Only SELECT, INSERT, UPDATE, and DELETE are supported".to_string(),
         )),
     }
 }
@@ -456,6 +458,143 @@ fn validate_insert(schema: &Schema, insert: &sqlparser::ast::Insert) -> Result<Q
                 }
                 SelectItem::Wildcard(_) => {
                     for col in &table.columns {
+                        let mut rust_type = col.data_type.to_rust_type();
+                        if col.nullable {
+                            rust_type = rust_type.nullable();
+                        }
+                        columns.push(QueryColumn {
+                            name: col.name.clone(),
+                            rust_type,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        return Ok(QueryResult { columns });
+    }
+
+    // No RETURNING - return empty result
+    Ok(QueryResult { columns: vec![] })
+}
+
+/// Validate an UPDATE statement.
+fn validate_update(
+    schema: &Schema,
+    table: &sqlparser::ast::TableWithJoins,
+    returning: Option<&[SelectItem]>,
+) -> Result<QueryResult> {
+    // Extract table name from the table reference
+    let table_name = match &table.relation {
+        TableFactor::Table { name, .. } => name
+            .0
+            .last()
+            .and_then(|part| part.as_ident())
+            .map(|i| i.value.clone())
+            .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?,
+        _ => return Err(Error::InvalidQuery("Unsupported table factor in UPDATE".to_string())),
+    };
+
+    // Verify table exists
+    let table_schema = schema
+        .get_table(&table_name)
+        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+
+    // If there's a RETURNING clause, infer those types
+    if let Some(returning) = returning {
+        let mut ctx = ResolveContext::default();
+        ctx.table_aliases
+            .insert(table_name.to_lowercase(), table_name.clone());
+
+        let mut columns = Vec::new();
+        for item in returning {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    let (name, rust_type) = infer_expr_type(schema, &ctx, expr)?;
+                    columns.push(QueryColumn { name, rust_type });
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    let (_, rust_type) = infer_expr_type(schema, &ctx, expr)?;
+                    columns.push(QueryColumn {
+                        name: alias.value.clone(),
+                        rust_type,
+                    });
+                }
+                SelectItem::Wildcard(_) => {
+                    for col in &table_schema.columns {
+                        let mut rust_type = col.data_type.to_rust_type();
+                        if col.nullable {
+                            rust_type = rust_type.nullable();
+                        }
+                        columns.push(QueryColumn {
+                            name: col.name.clone(),
+                            rust_type,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        return Ok(QueryResult { columns });
+    }
+
+    // No RETURNING - return empty result
+    Ok(QueryResult { columns: vec![] })
+}
+
+/// Validate a DELETE statement.
+fn validate_delete(schema: &Schema, delete: &sqlparser::ast::Delete) -> Result<QueryResult> {
+    use sqlparser::ast::FromTable;
+
+    // Extract table name from the first table in from
+    let from_tables = match &delete.from {
+        FromTable::WithFromKeyword(tables) => tables,
+        FromTable::WithoutKeyword(tables) => tables,
+    };
+
+    let table_with_joins = from_tables
+        .first()
+        .ok_or_else(|| Error::InvalidQuery("DELETE must have FROM clause".to_string()))?;
+
+    let table_name = match &table_with_joins.relation {
+        TableFactor::Table { name, .. } => name
+            .0
+            .last()
+            .and_then(|part| part.as_ident())
+            .map(|i| i.value.clone())
+            .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?,
+        _ => return Err(Error::InvalidQuery("Unsupported table factor in DELETE".to_string())),
+    };
+
+    // Verify table exists
+    let table_schema = schema
+        .get_table(&table_name)
+        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+
+    // If there's a RETURNING clause, infer those types
+    if let Some(returning) = &delete.returning {
+        let mut ctx = ResolveContext::default();
+        ctx.table_aliases
+            .insert(table_name.to_lowercase(), table_name.clone());
+
+        let mut columns = Vec::new();
+        for item in returning {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    let (name, rust_type) = infer_expr_type(schema, &ctx, expr)?;
+                    columns.push(QueryColumn { name, rust_type });
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    let (_, rust_type) = infer_expr_type(schema, &ctx, expr)?;
+                    columns.push(QueryColumn {
+                        name: alias.value.clone(),
+                        rust_type,
+                    });
+                }
+                SelectItem::Wildcard(_) => {
+                    for col in &table_schema.columns {
                         let mut rust_type = col.data_type.to_rust_type();
                         if col.nullable {
                             rust_type = rust_type.nullable();
