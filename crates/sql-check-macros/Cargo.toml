@@ -7,6 +7,10 @@ description = "Proc macros for sql-check"
 [lib]
 proc-macro = true
 
+[features]
+default = []
+sqlx = []
+
 [dependencies]
 sql-check = { path = "../sql-check" }
 proc-macro2.workspace = true

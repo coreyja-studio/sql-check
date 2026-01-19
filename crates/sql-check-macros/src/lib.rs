@@ -322,3 +322,133 @@ fn rust_type_to_tokens(ty: &sql_check::RustType) -> TokenStream2 {
         }
     }
 }
+
+/// The `sqlx_query!` macro validates SQL at compile time and generates sqlx-compatible code.
+///
+/// This is the sqlx-specific version of the query macro. It generates code that uses
+/// sqlx's query builder with chained `.bind()` calls.
+///
+/// # Example
+///
+/// ```ignore
+/// // Without parameters
+/// let users = sqlx_query!("SELECT id, name FROM users")
+///     .fetch_all(&pool)
+///     .await?;
+///
+/// // With parameters
+/// let user = sqlx_query!("SELECT id, name FROM users WHERE id = $1", user_id)
+///     .fetch_one(&pool)
+///     .await?;
+///
+/// // Results are typed
+/// for user in users {
+///     println!("{}: {}", user.id, user.name);
+/// }
+/// ```
+#[proc_macro]
+pub fn sqlx_query(input: TokenStream) -> TokenStream {
+    let query_input = parse_macro_input!(input as QueryInput);
+    let sql = query_input.sql.value();
+    let params = query_input.params;
+
+    // Load schema
+    let schema = match load_schema() {
+        Ok(s) => s,
+        Err(e) => {
+            return syn::Error::new_spanned(query_input.sql, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    // Validate query
+    let result = match validate_query(&schema, &sql) {
+        Ok(r) => r,
+        Err(e) => {
+            return syn::Error::new_spanned(
+                query_input.sql,
+                format!("SQL validation error: {}", e),
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Count parameter placeholders in SQL
+    let param_count = count_placeholders(&sql);
+    if params.len() != param_count {
+        return syn::Error::new_spanned(
+            query_input.sql,
+            format!(
+                "Expected {} parameter(s) but got {}",
+                param_count,
+                params.len()
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Generate the output for sqlx
+    let generated = generate_sqlx_query_code(&sql, &result, &params);
+
+    generated.into()
+}
+
+/// Generate the code for a validated query using sqlx.
+fn generate_sqlx_query_code(
+    sql: &str,
+    result: &sql_check::validate::QueryResult,
+    params: &[Expr],
+) -> TokenStream2 {
+    // Generate field definitions for the result struct
+    let fields: Vec<TokenStream2> = result
+        .columns
+        .iter()
+        .map(|col| {
+            let name = format_ident!("{}", sanitize_field_name(&col.name));
+            let ty = rust_type_to_tokens(&col.rust_type);
+            quote! { pub #name: #ty }
+        })
+        .collect();
+
+    // Generate the row mapping code using sqlx::Row::get
+    let field_mappings: Vec<TokenStream2> = result
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(idx, col)| {
+            let name = format_ident!("{}", sanitize_field_name(&col.name));
+            quote! { #name: ::sqlx::Row::get(&row, #idx) }
+        })
+        .collect();
+
+    let struct_name = format_ident!("SqlCheckQueryResult");
+
+    // Generate bind calls for parameters
+    let bind_calls: Vec<TokenStream2> = params
+        .iter()
+        .map(|param| {
+            quote! { .bind(#param) }
+        })
+        .collect();
+
+    quote! {
+        {
+            #[derive(Debug, Clone)]
+            pub struct #struct_name {
+                #(#fields),*
+            }
+
+            ::sql_check::sqlx_runtime::SqlxQueryBuilder::<#struct_name>::new(
+                #sql,
+                |row: &::sqlx::postgres::PgRow| -> #struct_name {
+                    #struct_name {
+                        #(#field_mappings),*
+                    }
+                }
+            )#(#bind_calls)*
+        }
+    }
+}

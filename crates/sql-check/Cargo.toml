@@ -7,6 +7,7 @@ description = "Compile-time SQL query validation against a schema file"
 [features]
 default = []
 runtime = ["tokio-postgres"]
+sqlx-runtime = ["sqlx", "uuid", "chrono"]
 
 [dependencies]
 sqlparser.workspace = true
@@ -14,6 +15,9 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio-postgres = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true }
+uuid = { version = "1", optional = true }
+chrono = { version = "0.4", optional = true }
 
 [dev-dependencies]
 pretty_assertions.workspace = true
