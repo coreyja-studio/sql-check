@@ -1,0 +1,14 @@
+[package]
+name = "sql-check-macros"
+version.workspace = true
+edition.workspace = true
+description = "Proc macros for sql-check"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+sql-check = { path = "../sql-check" }
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
