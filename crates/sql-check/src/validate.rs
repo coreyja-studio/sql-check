@@ -19,7 +19,7 @@ pub struct QueryResult {
 }
 
 /// A column in the query result.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QueryColumn {
     pub name: String,
     pub rust_type: RustType,
@@ -48,6 +48,13 @@ pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
     }
 }
 
+/// A CTE (Common Table Expression) definition with its column types.
+#[derive(Debug, Clone)]
+struct CteDefinition {
+    /// Column definitions inferred from the CTE's query
+    columns: Vec<QueryColumn>,
+}
+
 /// Context for resolving column references.
 #[derive(Debug, Default)]
 struct ResolveContext {
@@ -56,6 +63,8 @@ struct ResolveContext {
     /// Tables whose columns are nullable due to JOIN type
     /// (right side of LEFT JOIN, left side of RIGHT JOIN, both sides of FULL OUTER JOIN)
     nullable_tables: Vec<String>,
+    /// CTE definitions: name -> columns
+    cte_definitions: HashMap<String, CteDefinition>,
 }
 
 impl ResolveContext {
@@ -71,22 +80,64 @@ impl ResolveContext {
             self.nullable_tables.push(lower);
         }
     }
+
+    fn get_cte(&self, name: &str) -> Option<&CteDefinition> {
+        self.cte_definitions.get(&name.to_lowercase())
+    }
+
+    fn add_cte(&mut self, name: String, columns: Vec<QueryColumn>) {
+        self.cte_definitions
+            .insert(name.to_lowercase(), CteDefinition { columns });
+    }
 }
 
 /// Validate a SELECT query.
 fn validate_select(schema: &Schema, query: &Query) -> Result<QueryResult> {
+    // First, process CTEs if present
+    let mut ctx = ResolveContext::default();
+
+    if let Some(with_clause) = &query.with {
+        for cte in &with_clause.cte_tables {
+            // Get the CTE name
+            let cte_name = cte.alias.name.value.clone();
+
+            // Recursively validate the CTE's query to get its column types
+            let cte_result = validate_select(schema, &cte.query)?;
+
+            // If the CTE has explicit column aliases, use those names
+            let columns = if !cte.alias.columns.is_empty() {
+                // CTE has explicit column names: WITH cte(col1, col2) AS (...)
+                cte_result
+                    .columns
+                    .into_iter()
+                    .zip(cte.alias.columns.iter())
+                    .map(|(mut col, alias_col)| {
+                        col.name = alias_col.name.value.clone();
+                        col
+                    })
+                    .collect()
+            } else {
+                cte_result.columns
+            };
+
+            ctx.add_cte(cte_name, columns);
+        }
+    }
+
     match query.body.as_ref() {
-        SetExpr::Select(select) => validate_select_body(schema, select),
+        SetExpr::Select(select) => validate_select_body_with_ctx(schema, select, ctx),
         _ => Err(Error::InvalidQuery(
             "Only simple SELECT queries are supported".to_string(),
         )),
     }
 }
 
-/// Validate the SELECT body.
-fn validate_select_body(schema: &Schema, select: &Select) -> Result<QueryResult> {
-    let mut ctx = ResolveContext::default();
-
+/// Validate the SELECT body with an existing context (preserves CTE definitions).
+fn validate_select_body_with_ctx(
+    schema: &Schema,
+    select: &Select,
+    mut ctx: ResolveContext,
+) -> Result<QueryResult> {
     // First, resolve table references in FROM clause
     for table_with_joins in &select.from {
         resolve_table_refs(schema, table_with_joins, &mut ctx)?;
@@ -109,26 +160,38 @@ fn validate_select_body(schema: &Schema, select: &Select) -> Result<QueryResult>
                 });
             }
             SelectItem::Wildcard(_) => {
-                // For *, we need to add all columns from all tables
-                for (alias, table_name) in &ctx.table_aliases {
-                    let table = schema
-                        .get_table(table_name)
-                        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
-
-                    for col in &table.columns {
-                        let mut rust_type = col.data_type.to_rust_type();
-                        if col.nullable || ctx.is_nullable_table(alias) {
-                            rust_type = rust_type.nullable();
+                // For *, we need to add all columns from all tables (including CTEs)
+                for (alias, table_ref) in &ctx.table_aliases {
+                    // Check if this is a CTE reference
+                    if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
+                        if let Some(cte) = ctx.get_cte(cte_name) {
+                            for cte_col in &cte.columns {
+                                let mut rust_type = cte_col.rust_type.clone();
+                                if ctx.is_nullable_table(alias) {
+                                    rust_type = rust_type.nullable();
+                                }
+                                columns.push(QueryColumn {
+                                    name: cte_col.name.clone(),
+                                    rust_type,
+                                });
+                            }
                         }
-                        columns.push(QueryColumn {
-                            name: col.name.clone(),
-                            rust_type,
-                        });
+                    } else if let Some(table) = schema.get_table(table_ref) {
+                        for col in &table.columns {
+                            let mut rust_type = col.data_type.to_rust_type();
+                            if col.nullable || ctx.is_nullable_table(alias) {
+                                rust_type = rust_type.nullable();
+                            }
+                            columns.push(QueryColumn {
+                                name: col.name.clone(),
+                                rust_type,
+                            });
+                        }
                     }
                 }
             }
             SelectItem::QualifiedWildcard(kind, _) => {
-                // For table.*, add all columns from that table
+                // For table.*, add all columns from that table (or CTE)
                 use sqlparser::ast::SelectItemQualifiedWildcardKind;
                 let table_alias = match kind {
                     SelectItemQualifiedWildcardKind::ObjectName(obj_name) => obj_name
@@ -146,24 +209,42 @@ fn validate_select_body(schema: &Schema, select: &Select) -> Result<QueryResult>
                     }
                 };
 
-                let table_name = ctx
+                let table_ref = ctx
                     .table_aliases
                     .get(&table_alias.to_lowercase())
                     .ok_or_else(|| Error::UnknownTable(table_alias.clone()))?;
 
-                let table = schema
-                    .get_table(table_name)
-                    .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+                // Check if this is a CTE reference
+                if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
+                    let cte = ctx
+                        .get_cte(cte_name)
+                        .ok_or_else(|| Error::UnknownTable(cte_name.to_string()))?;
 
-                for col in &table.columns {
-                    let mut rust_type = col.data_type.to_rust_type();
-                    if col.nullable || ctx.is_nullable_table(&table_alias) {
-                        rust_type = rust_type.nullable();
+                    for cte_col in &cte.columns {
+                        let mut rust_type = cte_col.rust_type.clone();
+                        if ctx.is_nullable_table(&table_alias) {
+                            rust_type = rust_type.nullable();
+                        }
+                        columns.push(QueryColumn {
+                            name: cte_col.name.clone(),
+                            rust_type,
+                        });
                     }
-                    columns.push(QueryColumn {
-                        name: col.name.clone(),
-                        rust_type,
-                    });
+                } else {
+                    let table = schema
+                        .get_table(table_ref)
+                        .ok_or_else(|| Error::UnknownTable(table_ref.clone()))?;
+
+                    for col in &table.columns {
+                        let mut rust_type = col.data_type.to_rust_type();
+                        if col.nullable || ctx.is_nullable_table(&table_alias) {
+                            rust_type = rust_type.nullable();
+                        }
+                        columns.push(QueryColumn {
+                            name: col.name.clone(),
+                            rust_type,
+                        });
+                    }
                 }
             }
         }
@@ -258,19 +339,26 @@ fn resolve_table_factor(
                 .map(|i| i.value.clone())
                 .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string()))?;
 
-            // Verify table exists
-            if !schema.has_table(&table_name) {
-                return Err(Error::UnknownTable(table_name));
-            }
-
             // Use alias if provided, otherwise use table name
             let alias_name = alias
                 .as_ref()
                 .map(|a| a.name.value.clone())
                 .unwrap_or_else(|| table_name.clone());
 
-            ctx.table_aliases
-                .insert(alias_name.to_lowercase(), table_name.clone());
+            // Check if this is a CTE reference first
+            if ctx.get_cte(&table_name).is_some() {
+                // It's a CTE - use the special marker "_cte:<name>"
+                ctx.table_aliases
+                    .insert(alias_name.to_lowercase(), format!("_cte:{}", table_name.to_lowercase()));
+            } else {
+                // Not a CTE - verify table exists in schema
+                if !schema.has_table(&table_name) {
+                    return Err(Error::UnknownTable(table_name));
+                }
+
+                ctx.table_aliases
+                    .insert(alias_name.to_lowercase(), table_name.clone());
+            }
         }
         TableFactor::Derived { alias: Some(a), .. } => {
             // Subquery - for now, just track the alias
@@ -299,6 +387,17 @@ fn infer_expr_type(
         Expr::Identifier(ident) => {
             // Unqualified column reference - need to find which table it's from
             let col_name = &ident.value;
+
+            // First, try to find in CTEs
+            if let Some((table_alias, rust_type)) = find_column_in_ctes(ctx, col_name) {
+                let mut rust_type = rust_type;
+                if ctx.is_nullable_table(&table_alias) {
+                    rust_type = rust_type.nullable();
+                }
+                return Ok((col_name.clone(), rust_type));
+            }
+
+            // Then try schema tables
             let (table_alias, col) = find_column_in_tables(schema, ctx, col_name)?;
 
             let mut rust_type = col.data_type.to_rust_type();
@@ -320,19 +419,44 @@ fn infer_expr_type(
             let table_alias = &idents[0].value;
             let col_name = &idents[1].value;
 
-            let table_name = ctx
+            let table_ref = ctx
                 .table_aliases
                 .get(&table_alias.to_lowercase())
                 .ok_or_else(|| Error::UnknownTable(table_alias.clone()))?;
 
+            // Check if this is a CTE reference
+            if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
+                // Look up the column in the CTE definition
+                let cte = ctx
+                    .get_cte(cte_name)
+                    .ok_or_else(|| Error::UnknownTable(cte_name.to_string()))?;
+
+                let cte_col = cte
+                    .columns
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(col_name))
+                    .ok_or_else(|| Error::UnknownColumn {
+                        table: cte_name.to_string(),
+                        column: col_name.clone(),
+                    })?;
+
+                let mut rust_type = cte_col.rust_type.clone();
+                if ctx.is_nullable_table(table_alias) {
+                    rust_type = rust_type.nullable();
+                }
+
+                return Ok((col_name.clone(), rust_type));
+            }
+
+            // Regular table lookup
             let table = schema
-                .get_table(table_name)
-                .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+                .get_table(table_ref)
+                .ok_or_else(|| Error::UnknownTable(table_ref.clone()))?;
 
             let col = table
                 .get_column(col_name)
                 .ok_or_else(|| Error::UnknownColumn {
-                    table: table_name.clone(),
+                    table: table_ref.clone(),
                     column: col_name.clone(),
                 })?;
 
@@ -445,7 +569,29 @@ fn get_first_arg_type(
     }
 }
 
-/// Find a column in any of the tables in context.
+/// Find a column in CTE definitions.
+fn find_column_in_ctes(ctx: &ResolveContext, col_name: &str) -> Option<(String, RustType)> {
+    let mut found: Option<(String, RustType)> = None;
+
+    for (alias, table_ref) in &ctx.table_aliases {
+        if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
+            if let Some(cte) = ctx.get_cte(cte_name) {
+                if let Some(col) = cte.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name)) {
+                    if found.is_some() {
+                        // Ambiguous - but we return None and let find_column_in_tables handle it
+                        // (though it won't find anything, leading to proper error)
+                        return None;
+                    }
+                    found = Some((alias.clone(), col.rust_type.clone()));
+                }
+            }
+        }
+    }
+
+    found
+}
+
+/// Find a column in any of the tables in context (excluding CTEs).
 fn find_column_in_tables<'a>(
     schema: &'a Schema,
     ctx: &ResolveContext,
@@ -454,6 +600,11 @@ fn find_column_in_tables<'a>(
     let mut found: Option<(String, &crate::schema::Column)> = None;
 
     for (alias, table_name) in &ctx.table_aliases {
+        // Skip CTE references
+        if table_name.starts_with("_cte:") {
+            continue;
+        }
+
         if let Some(table) = schema.get_table(table_name) {
             if let Some(col) = table.get_column(col_name) {
                 if found.is_some() {
@@ -1064,5 +1215,182 @@ mod tests {
         let result = validate_query(&schema, "DELETE FROM nonexistent WHERE id = $1");
 
         assert!(matches!(result, Err(Error::UnknownTable(_))));
+    }
+
+    // CTE (Common Table Expression) tests
+
+    #[test]
+    fn test_validate_simple_cte() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH active_users AS (
+                SELECT id, name FROM users
+            )
+            SELECT id, name FROM active_users
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_cte_with_alias() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH active_users AS (
+                SELECT id, name FROM users
+            )
+            SELECT au.id, au.name FROM active_users au
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_cte_with_explicit_column_names() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH user_info(user_id, user_name) AS (
+                SELECT id, name FROM users
+            )
+            SELECT user_id, user_name FROM user_info
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "user_id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "user_name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_cte_wildcard() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH active_users AS (
+                SELECT id, name FROM users
+            )
+            SELECT * FROM active_users
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[1].name, "name");
+    }
+
+    #[test]
+    fn test_validate_cte_qualified_wildcard() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH active_users AS (
+                SELECT id, name FROM users
+            )
+            SELECT active_users.* FROM active_users
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[1].name, "name");
+    }
+
+    #[test]
+    fn test_validate_cte_with_join() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH user_profiles AS (
+                SELECT u.id, u.name, p.bio
+                FROM users u
+                LEFT JOIN profiles p ON p.user_id = u.id
+            )
+            SELECT id, name, bio FROM user_profiles
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        // bio is nullable from the LEFT JOIN in the CTE
+        assert_eq!(result.columns[2].name, "bio");
+        assert_eq!(
+            result.columns[2].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_multiple_ctes() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH
+                user_data AS (SELECT id, name FROM users),
+                profile_data AS (SELECT user_id, bio FROM profiles)
+            SELECT u.id, u.name, p.bio
+            FROM user_data u
+            LEFT JOIN profile_data p ON p.user_id = u.id
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        // bio is nullable because profile_data is LEFT JOINed
+        assert_eq!(result.columns[2].name, "bio");
+        assert_eq!(
+            result.columns[2].rust_type,
+            RustType::Option(Box::new(RustType::Option(Box::new(RustType::String))))
+        );
+    }
+
+    #[test]
+    fn test_validate_cte_unknown_column() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            WITH active_users AS (
+                SELECT id, name FROM users
+            )
+            SELECT nonexistent FROM active_users
+            "#,
+        );
+
+        assert!(matches!(result, Err(Error::UnknownColumn { .. })));
     }
 }

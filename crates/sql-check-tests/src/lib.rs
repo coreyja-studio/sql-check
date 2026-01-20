@@ -14,7 +14,6 @@
 //! - DELETE (with RETURNING)
 //!
 //! Known limitations (tests commented out):
-//! - CTEs: WITH clause table resolution not implemented
 //! - Window functions: ROW_NUMBER, RANK, etc. not supported
 //! - UNION/INTERSECT/EXCEPT: Set operations not supported
 //! - Array operations: ANY, array overlap not tested
@@ -537,19 +536,50 @@ fn test_now_function() {
 
 // --- CTE (WITH clause) ---
 // CTEs fail because the table names from WITH clause are not recognized.
-//
-// #[test]
-// fn test_cte_simple() {
-//     let q = query!(
-//         r#"
-//         WITH active_users AS (
-//             SELECT id, name FROM users
-//         )
-//         SELECT id, name FROM active_users
-//         "#
-//     );
-//     assert!(q.sql().contains("WITH"));
-// }
+// ============================================================================
+// CTE (Common Table Expression) tests
+// ============================================================================
+
+#[test]
+fn test_cte_simple() {
+    let q = query!(
+        r#"
+        WITH active_users AS (
+            SELECT id, name FROM users
+        )
+        SELECT id, name FROM active_users
+        "#
+    );
+    assert!(q.sql().contains("WITH"));
+}
+
+#[test]
+fn test_cte_with_alias() {
+    let q = query!(
+        r#"
+        WITH user_summary AS (
+            SELECT id, name, email FROM users
+        )
+        SELECT us.id, us.name FROM user_summary us
+        "#
+    );
+    assert!(q.sql().contains("WITH"));
+}
+
+#[test]
+fn test_cte_multiple() {
+    let q = query!(
+        r#"
+        WITH
+            user_data AS (SELECT id, name FROM users),
+            profile_data AS (SELECT user_id, bio FROM profiles)
+        SELECT u.id, u.name, p.bio
+        FROM user_data u
+        LEFT JOIN profile_data p ON p.user_id = u.id
+        "#
+    );
+    assert!(q.sql().contains("WITH"));
+}
 
 // ============================================================================
 // UPDATE statement tests

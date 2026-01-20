@@ -32,11 +32,11 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ✅ **Type inference** from schema (UUID, text, jsonb, timestamp, boolean, integer, decimal, etc.)
 - ✅ **Nullability inference** from LEFT/RIGHT/FULL OUTER JOINs
 - ✅ **Decimal/Numeric columns** (via rust_decimal)
+- ✅ **CTEs** (WITH clause) with type inference from CTE definitions
 
 ### Known Limitations
 
-- ❌ **CTEs** (WITH clause) - table names from WITH not recognized
-- ❌ **Subqueries in FROM** - same issue as CTEs
+- ❌ **Subqueries in FROM** - derived tables not yet supported
 - ❌ **SUM/AVG aggregates** - always return Decimal
 - ❌ **Window functions** (ROW_NUMBER, RANK, LAG, LEAD, etc.)
 - ❌ **String functions** (UPPER, LOWER, CONCAT, SUBSTRING, LENGTH)
@@ -88,7 +88,7 @@ pg_dump --schema-only mydb > schema.sql
 
 ## Test Coverage
 
-### Unit Tests (54 tests)
+### Unit Tests (57 tests)
 Compile-time validation tests that verify the `query!` macro correctly parses and validates SQL without needing a database.
 
 ### Compile-Fail Tests (6 tests)
