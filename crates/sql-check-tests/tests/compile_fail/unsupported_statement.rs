@@ -3,6 +3,6 @@
 use sql_check_macros::query;
 
 fn main() {
-    // UPDATE is not supported
-    let _q = query!("UPDATE users SET name = 'test'");
+    // CREATE TABLE is not supported
+    let _q = query!("CREATE TABLE test (id int)");
 }
