@@ -348,8 +348,10 @@ fn resolve_table_factor(
             // Check if this is a CTE reference first
             if ctx.get_cte(&table_name).is_some() {
                 // It's a CTE - use the special marker "_cte:<name>"
-                ctx.table_aliases
-                    .insert(alias_name.to_lowercase(), format!("_cte:{}", table_name.to_lowercase()));
+                ctx.table_aliases.insert(
+                    alias_name.to_lowercase(),
+                    format!("_cte:{}", table_name.to_lowercase()),
+                );
             } else {
                 // Not a CTE - verify table exists in schema
                 if !schema.has_table(&table_name) {
@@ -529,9 +531,26 @@ fn infer_expr_type(
                 "regexp_replace" | "regexp_substr" | "regexp_match" => RustType::String,
 
                 // String functions that return integers
-                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => RustType::I32,
+                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
+                    RustType::I32
+                }
                 "position" | "strpos" => RustType::I32,
                 "ascii" => RustType::I32,
+
+                // Date/time functions
+                "extract" | "date_part" => RustType::F64,
+                "date_trunc" => RustType::DateTime,
+                "age" => RustType::Duration,
+                "to_char" => RustType::String,
+                "to_date" => RustType::Date,
+                "to_timestamp" => RustType::DateTime,
+                "current_date" => RustType::Date,
+                "current_time" => RustType::Time,
+                "current_timestamp" | "localtimestamp" | "localtime" => RustType::DateTime,
+                "make_date" => RustType::Date,
+                "make_time" => RustType::Time,
+                "make_timestamp" | "make_timestamptz" => RustType::DateTime,
+                "make_interval" => RustType::Duration,
 
                 _ => RustType::Custom(func_name.clone()),
             };
@@ -566,6 +585,34 @@ fn infer_expr_type(
             // Parenthesized expression
             infer_expr_type(schema, ctx, inner)
         }
+        Expr::Extract { .. } => {
+            // EXTRACT(field FROM timestamp) returns f64
+            Ok(("extract".to_string(), RustType::F64))
+        }
+        Expr::Ceil { .. } => {
+            // CEIL can be numeric or date/time, return f64 as a reasonable default
+            Ok(("ceil".to_string(), RustType::F64))
+        }
+        Expr::Floor { .. } => {
+            // FLOOR can be numeric or date/time, return f64 as a reasonable default
+            Ok(("floor".to_string(), RustType::F64))
+        }
+        Expr::Position { .. } => {
+            // POSITION(substring IN string) returns i32
+            Ok(("position".to_string(), RustType::I32))
+        }
+        Expr::Substring { .. } => {
+            // SUBSTRING returns String
+            Ok(("substring".to_string(), RustType::String))
+        }
+        Expr::Trim { .. } => {
+            // TRIM returns String
+            Ok(("trim".to_string(), RustType::String))
+        }
+        Expr::Overlay { .. } => {
+            // OVERLAY returns String
+            Ok(("overlay".to_string(), RustType::String))
+        }
         _ => {
             // Default to String for unknown expressions
             Ok(("?column?".to_string(), RustType::String))
@@ -598,7 +645,11 @@ fn find_column_in_ctes(ctx: &ResolveContext, col_name: &str) -> Option<(String, 
     for (alias, table_ref) in &ctx.table_aliases {
         if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
             if let Some(cte) = ctx.get_cte(cte_name) {
-                if let Some(col) = cte.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name)) {
+                if let Some(col) = cte
+                    .columns
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(col_name))
+                {
                     if found.is_some() {
                         // Ambiguous - but we return None and let find_column_in_tables handle it
                         // (though it won't find anything, leading to proper error)
@@ -735,7 +786,7 @@ fn validate_update(schema: &Schema, update: &Update) -> Result<QueryResult> {
         ctx.table_aliases
             .insert(table_name.to_lowercase(), table_name.clone());
 
-        return infer_returning_types(schema, &ctx, &table, returning);
+        return infer_returning_types(schema, &ctx, table, returning);
     }
 
     // No RETURNING - return empty result
@@ -758,7 +809,7 @@ fn validate_delete(schema: &Schema, delete: &Delete) -> Result<QueryResult> {
         ctx.table_aliases
             .insert(table_name.to_lowercase(), table_name.clone());
 
-        return infer_returning_types(schema, &ctx, &table, returning);
+        return infer_returning_types(schema, &ctx, table, returning);
     }
 
     // No RETURNING - return empty result
@@ -804,7 +855,9 @@ fn extract_assignment_target_columns(target: &AssignmentTarget) -> Result<Vec<St
                 .last()
                 .and_then(|part| part.as_ident())
                 .map(|i| i.value.clone())
-                .ok_or_else(|| Error::InvalidQuery("Empty column name in assignment".to_string()))?;
+                .ok_or_else(|| {
+                    Error::InvalidQuery("Empty column name in assignment".to_string())
+                })?;
             Ok(vec![col_name])
         }
         AssignmentTarget::Tuple(obj_names) => {
@@ -1140,8 +1193,7 @@ mod tests {
     #[test]
     fn test_validate_update_with_where() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2").unwrap();
+        let result = validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2").unwrap();
 
         assert_eq!(result.columns.len(), 0);
     }
@@ -1165,9 +1217,11 @@ mod tests {
     #[test]
     fn test_validate_update_returning_all() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2 RETURNING *")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "UPDATE users SET name = $1 WHERE id = $2 RETURNING *",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 4); // id, name, email, metadata
         assert_eq!(result.columns[0].name, "id");
@@ -1212,8 +1266,11 @@ mod tests {
     #[test]
     fn test_validate_delete_returning() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "DELETE FROM users WHERE id = $1 RETURNING id, name").unwrap();
+        let result = validate_query(
+            &schema,
+            "DELETE FROM users WHERE id = $1 RETURNING id, name",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "id");
@@ -1489,9 +1546,11 @@ mod tests {
     #[test]
     fn test_validate_upper_lower() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT UPPER(name) as upper_name, LOWER(name) as lower_name FROM users")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "SELECT UPPER(name) as upper_name, LOWER(name) as lower_name FROM users",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "upper_name");
@@ -1503,8 +1562,8 @@ mod tests {
     #[test]
     fn test_validate_concat() {
         let schema = test_schema();
-        let result = validate_query(&schema, "SELECT CONCAT(name, email) as combined FROM users")
-            .unwrap();
+        let result =
+            validate_query(&schema, "SELECT CONCAT(name, email) as combined FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "combined");
@@ -1514,8 +1573,7 @@ mod tests {
     #[test]
     fn test_validate_length_returns_i32() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT LENGTH(name) as name_len FROM users").unwrap();
+        let result = validate_query(&schema, "SELECT LENGTH(name) as name_len FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "name_len");
@@ -1548,8 +1606,7 @@ mod tests {
     #[test]
     fn test_validate_char_length_returns_i32() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT CHAR_LENGTH(name) as len FROM users").unwrap();
+        let result = validate_query(&schema, "SELECT CHAR_LENGTH(name) as len FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "len");
@@ -1574,11 +1631,136 @@ mod tests {
     #[test]
     fn test_validate_replace() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT REPLACE(name, 'a', 'b') as replaced FROM users")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "SELECT REPLACE(name, 'a', 'b') as replaced FROM users",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    // Date/time function tests
+
+    fn test_schema_with_timestamps() -> Schema {
+        Schema::from_sql(
+            r#"
+            CREATE TABLE orders (
+                id uuid NOT NULL,
+                user_id uuid NOT NULL,
+                created_at timestamp with time zone NOT NULL DEFAULT now(),
+                updated_at timestamp with time zone NOT NULL DEFAULT now()
+            );
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_validate_extract_returns_f64() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "year");
+        assert_eq!(result.columns[1].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_extract_month() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT EXTRACT(MONTH FROM created_at) as month FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "month");
+        assert_eq!(result.columns[0].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_date_trunc_returns_datetime() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT DATE_TRUNC('day', created_at) as day FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "day");
+        assert_eq!(result.columns[0].rust_type, RustType::DateTime);
+    }
+
+    #[test]
+    fn test_validate_date_part_returns_f64() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT DATE_PART('hour', created_at) as hour FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "hour");
+        assert_eq!(result.columns[0].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_age_returns_duration() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT AGE(updated_at, created_at) as duration FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "duration");
+        assert_eq!(result.columns[0].rust_type, RustType::Duration);
+    }
+
+    #[test]
+    fn test_validate_to_char_returns_string() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as formatted FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "formatted");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_now_returns_datetime() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(&schema, "SELECT NOW() as current_time FROM orders").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "current_time");
+        assert_eq!(result.columns[0].rust_type, RustType::DateTime);
+    }
+
+    #[test]
+    fn test_validate_position_returns_i32() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT POSITION('@' IN email) as pos FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "pos");
+        assert_eq!(result.columns[0].rust_type, RustType::I32);
     }
 }

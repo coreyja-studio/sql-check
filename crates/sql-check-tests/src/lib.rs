@@ -154,7 +154,9 @@ fn test_min_max_text() {
 // MIN/MAX on integer columns return Option<i32> which might work
 #[test]
 fn test_min_max_integer() {
-    let q = query!("SELECT MIN(stock_quantity) as min_stock, MAX(stock_quantity) as max_stock FROM products");
+    let q = query!(
+        "SELECT MIN(stock_quantity) as min_stock, MAX(stock_quantity) as max_stock FROM products"
+    );
     assert!(q.sql().contains("MIN"));
     assert!(q.sql().contains("MAX"));
 }
@@ -207,7 +209,8 @@ fn test_order_by() {
 
 #[test]
 fn test_order_by_multiple() {
-    let q = query!("SELECT id, status, created_at FROM orders ORDER BY status ASC, created_at DESC");
+    let q =
+        query!("SELECT id, status, created_at FROM orders ORDER BY status ASC, created_at DESC");
     assert!(q.sql().contains("ORDER BY"));
 }
 
@@ -334,9 +337,8 @@ fn test_not_exists() {
 
 #[test]
 fn test_coalesce() {
-    let q = query!(
-        "SELECT id, COALESCE(description, 'No description') as description FROM products"
-    );
+    let q =
+        query!("SELECT id, COALESCE(description, 'No description') as description FROM products");
     assert!(q.sql().contains("COALESCE"));
 }
 
@@ -370,18 +372,13 @@ fn test_where_and_or() {
 #[test]
 fn test_where_like() {
     let pattern = "%Laptop%".to_string();
-    let q = query!(
-        "SELECT id, name FROM products WHERE name LIKE $1",
-        pattern
-    );
+    let q = query!("SELECT id, name FROM products WHERE name LIKE $1", pattern);
     assert!(q.sql().contains("LIKE"));
 }
 
 #[test]
 fn test_where_in() {
-    let q = query!(
-        "SELECT id, status FROM orders WHERE status IN ('pending', 'completed')"
-    );
+    let q = query!("SELECT id, status FROM orders WHERE status IN ('pending', 'completed')");
     assert!(q.sql().contains("IN"));
 }
 
@@ -645,7 +642,10 @@ fn test_delete_simple() {
 #[test]
 fn test_delete_returning() {
     let user_id = uuid::Uuid::new_v4();
-    let q = query!("DELETE FROM users WHERE id = $1 RETURNING id, name", user_id);
+    let q = query!(
+        "DELETE FROM users WHERE id = $1 RETURNING id, name",
+        user_id
+    );
     assert!(q.sql().contains("RETURNING"));
 }
 
@@ -806,7 +806,8 @@ fn test_avg_decimal() {
 #[test]
 fn test_sum_with_group_by() {
     // SUM with GROUP BY returns Option<Decimal>
-    let q = query!("SELECT order_id, SUM(quantity) as total_qty FROM order_items GROUP BY order_id");
+    let q =
+        query!("SELECT order_id, SUM(quantity) as total_qty FROM order_items GROUP BY order_id");
     assert!(q.sql().contains("SUM"));
     assert!(q.sql().contains("GROUP BY"));
 }
@@ -822,13 +823,38 @@ fn test_sum_with_group_by() {
 // }
 
 // --- Date functions ---
-// EXTRACT, DATE_TRUNC return unknown types.
-//
+
+#[test]
+fn test_extract() {
+    let q = query!("SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders");
+    assert!(q.sql().contains("EXTRACT"));
+}
+
+#[test]
+fn test_date_trunc() {
+    let q = query!("SELECT id, DATE_TRUNC('day', created_at) as day FROM orders");
+    assert!(q.sql().contains("DATE_TRUNC"));
+}
+
+#[test]
+fn test_date_part() {
+    let q = query!("SELECT id, DATE_PART('hour', created_at) as hour FROM orders");
+    assert!(q.sql().contains("DATE_PART"));
+}
+
+// AGE() returns interval type which doesn't have FromSql implementation in postgres-types.
+// The type inference works (returns Duration) but runtime execution requires a custom type.
 // #[test]
-// fn test_extract() {
-//     let q = query!("SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders");
-//     assert!(q.sql().contains("EXTRACT"));
+// fn test_age() {
+//     let q = query!("SELECT id, AGE(updated_at, created_at) as duration FROM orders");
+//     assert!(q.sql().contains("AGE"));
 // }
+
+#[test]
+fn test_to_char() {
+    let q = query!("SELECT id, TO_CHAR(created_at, 'YYYY-MM-DD') as formatted FROM orders");
+    assert!(q.sql().contains("TO_CHAR"));
+}
 
 // ============================================================================
 // NOTE: To verify compile-time errors work, uncomment one of these:

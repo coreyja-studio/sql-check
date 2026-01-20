@@ -34,13 +34,14 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ✅ **Decimal/Numeric columns** (via rust_decimal)
 - ✅ **CTEs** (WITH clause) with type inference from CTE definitions
 - ✅ **String functions**: UPPER, LOWER, CONCAT, SUBSTRING, LENGTH, TRIM, REPLACE, LPAD/RPAD, SPLIT_PART, etc.
+- ✅ **Date/time functions**: EXTRACT, DATE_TRUNC, DATE_PART, TO_CHAR, NOW
 
 ### Known Limitations
 
 - ❌ **Subqueries in FROM** - derived tables not yet supported
 - ❌ **SUM/AVG aggregates** - always return Decimal
 - ❌ **Window functions** (ROW_NUMBER, RANK, LAG, LEAD, etc.)
-- ❌ **Date functions** (EXTRACT, DATE_TRUNC)
+- ❌ **AGE function** - returns interval which needs custom FromSql implementation
 - ❌ **UNION**, **INTERSECT**, **EXCEPT**
 - ❌ **Array operations** (ANY, array overlap)
 

@@ -289,7 +289,10 @@ async fn test_group_by() {
     let client = connect().await;
 
     // Clean up and add test data
-    client.execute("DELETE FROM order_items", &[]).await.unwrap();
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
     client.execute("DELETE FROM orders", &[]).await.unwrap();
     client.execute("DELETE FROM profiles", &[]).await.unwrap();
     client.execute("DELETE FROM users", &[]).await.unwrap();
@@ -416,7 +419,11 @@ async fn test_limit_offset() {
     let results = q.fetch_all(&client).await.unwrap();
 
     // Should have min(5, total-2) results
-    let expected_max = if total > 2 { std::cmp::min(5, total - 2) } else { 0 };
+    let expected_max = if total > 2 {
+        std::cmp::min(5, total - 2)
+    } else {
+        0
+    };
     assert!(results.len() <= expected_max);
 }
 
@@ -504,7 +511,10 @@ async fn test_nullable_column_handling() {
     let client = connect().await;
 
     // Clean up
-    client.execute("DELETE FROM order_items", &[]).await.unwrap();
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
     client.execute("DELETE FROM orders", &[]).await.unwrap();
     client.execute("DELETE FROM products", &[]).await.unwrap();
     client.execute("DELETE FROM categories", &[]).await.unwrap();
@@ -514,11 +524,7 @@ async fn test_nullable_column_handling() {
     client
         .execute(
             "INSERT INTO products (id, name, price, stock_quantity) VALUES ($1, $2, 50.00, $3)",
-            &[
-                &product_id,
-                &"Standalone Product".to_string(),
-                &5i32,
-            ],
+            &[&product_id, &"Standalone Product".to_string(), &5i32],
         )
         .await
         .unwrap();
@@ -540,9 +546,8 @@ async fn test_coalesce() {
     let client = connect().await;
 
     // COALESCE removes Option wrapper
-    let q = query!(
-        "SELECT id, COALESCE(description, 'No description') as description FROM products"
-    );
+    let q =
+        query!("SELECT id, COALESCE(description, 'No description') as description FROM products");
     let results = q.fetch_all(&client).await.unwrap();
 
     for result in results {
@@ -561,7 +566,10 @@ async fn test_self_join() {
     let client = connect().await;
 
     // Clean up
-    client.execute("DELETE FROM order_items", &[]).await.unwrap();
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
     client.execute("DELETE FROM orders", &[]).await.unwrap();
     client.execute("DELETE FROM products", &[]).await.unwrap();
     client.execute("DELETE FROM categories", &[]).await.unwrap();
@@ -630,10 +638,7 @@ async fn test_where_like() {
     let client = connect().await;
 
     let pattern = "%Product%".to_string();
-    let q = query!(
-        "SELECT id, name FROM products WHERE name LIKE $1",
-        pattern
-    );
+    let q = query!("SELECT id, name FROM products WHERE name LIKE $1", pattern);
     let _ = q.fetch_all(&client).await.unwrap();
 }
 
@@ -642,9 +647,7 @@ async fn test_where_in() {
     let client = connect().await;
 
     // IN with literal list
-    let q = query!(
-        "SELECT id, status FROM orders WHERE status IN ('pending', 'completed')"
-    );
+    let q = query!("SELECT id, status FROM orders WHERE status IN ('pending', 'completed')");
     let _ = q.fetch_all(&client).await.unwrap();
 }
 
@@ -885,7 +888,10 @@ async fn test_cross_join() {
     let client = connect().await;
 
     // Clean up
-    client.execute("DELETE FROM order_items", &[]).await.unwrap();
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
     client.execute("DELETE FROM orders", &[]).await.unwrap();
     client.execute("DELETE FROM products", &[]).await.unwrap();
     client.execute("DELETE FROM categories", &[]).await.unwrap();
