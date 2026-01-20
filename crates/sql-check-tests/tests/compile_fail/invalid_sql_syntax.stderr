@@ -1,0 +1,5 @@
+error: SQL validation error: Unknown column 'id' in table '<unknown>'
+ --> tests/compile_fail/invalid_sql_syntax.rs:7:21
+  |
+7 |     let _q = query!("SELECT id WHERE id = 1");
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^

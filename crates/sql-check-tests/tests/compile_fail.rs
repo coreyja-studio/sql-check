@@ -1,19 +1,20 @@
-//! Test that invalid SQL fails at compile time.
+//! Test that invalid SQL fails at compile time with proper error messages.
 //!
-//! Uncomment one of the test bodies to verify it fails.
+//! Uses trybuild to verify that certain code fails to compile and produces
+//! the expected error messages.
+//!
+//! NOTE: These tests require the SQL_CHECK_SCHEMA env var to be set.
+//! Run with: SQL_CHECK_SCHEMA=<path>/schema.sql cargo test --test compile_fail
 
-// Import kept for when tests are uncommented
-#[allow(unused_imports)]
-use sql_check_macros::query;
-
-#[test]
-fn test_invalid_table_fails() {
-    // Uncomment to test - should fail with "Unknown table: nonexistent_table"
-    // let q = query!("SELECT id FROM nonexistent_table");
-}
+use std::path::PathBuf;
 
 #[test]
-fn test_invalid_column_fails() {
-    // Uncomment to test - should fail with "Unknown column: nonexistent_column in table users"
-    // let q = query!("SELECT nonexistent_column FROM users");
+fn compile_fail_tests() {
+    // Set the schema path for trybuild compilation
+    // The schema is in the crate root
+    let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema.sql");
+    std::env::set_var("SQL_CHECK_SCHEMA", &schema_path);
+
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/*.rs");
 }

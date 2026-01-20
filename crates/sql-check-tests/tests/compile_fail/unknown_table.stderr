@@ -1,0 +1,5 @@
+error: SQL validation error: Unknown table: nonexistent_table
+ --> tests/compile_fail/unknown_table.rs:6:21
+  |
+6 |     let _q = query!("SELECT id FROM nonexistent_table");
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: SQL validation error: Unknown column 'nonexistent_col' in table 'users'
+ --> tests/compile_fail/insert_unknown_column.rs:6:21
+  |
+6 |     let _q = query!("INSERT INTO users (id, nonexistent_col) VALUES ($1, $2)",
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

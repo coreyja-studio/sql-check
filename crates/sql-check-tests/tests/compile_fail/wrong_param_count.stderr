@@ -1,0 +1,5 @@
+error: Expected 2 parameter(s) but got 1
+ --> tests/compile_fail/wrong_param_count.rs:8:21
+  |
+8 |     let _q = query!("SELECT id FROM users WHERE name = $1 AND email = $2", name);
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

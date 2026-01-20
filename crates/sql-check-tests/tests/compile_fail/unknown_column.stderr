@@ -1,0 +1,5 @@
+error: SQL validation error: Unknown column 'nonexistent_column' in table '<unknown>'
+ --> tests/compile_fail/unknown_column.rs:6:21
+  |
+6 |     let _q = query!("SELECT nonexistent_column FROM users");
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: SQL validation error: Invalid query: Only SELECT and INSERT are supported
+ --> tests/compile_fail/unsupported_statement.rs:7:21
+  |
+7 |     let _q = query!("UPDATE users SET name = 'test'");
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
