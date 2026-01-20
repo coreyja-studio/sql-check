@@ -822,13 +822,38 @@ fn test_sum_with_group_by() {
 // }
 
 // --- Date functions ---
-// EXTRACT, DATE_TRUNC return unknown types.
-//
+
+#[test]
+fn test_extract() {
+    let q = query!("SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders");
+    assert!(q.sql().contains("EXTRACT"));
+}
+
+#[test]
+fn test_date_trunc() {
+    let q = query!("SELECT id, DATE_TRUNC('day', created_at) as day FROM orders");
+    assert!(q.sql().contains("DATE_TRUNC"));
+}
+
+#[test]
+fn test_date_part() {
+    let q = query!("SELECT id, DATE_PART('hour', created_at) as hour FROM orders");
+    assert!(q.sql().contains("DATE_PART"));
+}
+
+// AGE() returns interval type which doesn't have FromSql implementation in postgres-types.
+// The type inference works (returns Duration) but runtime execution requires a custom type.
 // #[test]
-// fn test_extract() {
-//     let q = query!("SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders");
-//     assert!(q.sql().contains("EXTRACT"));
+// fn test_age() {
+//     let q = query!("SELECT id, AGE(updated_at, created_at) as duration FROM orders");
+//     assert!(q.sql().contains("AGE"));
 // }
+
+#[test]
+fn test_to_char() {
+    let q = query!("SELECT id, TO_CHAR(created_at, 'YYYY-MM-DD') as formatted FROM orders");
+    assert!(q.sql().contains("TO_CHAR"));
+}
 
 // ============================================================================
 // NOTE: To verify compile-time errors work, uncomment one of these:

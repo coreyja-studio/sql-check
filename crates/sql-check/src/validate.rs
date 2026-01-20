@@ -533,6 +533,21 @@ fn infer_expr_type(
                 "position" | "strpos" => RustType::I32,
                 "ascii" => RustType::I32,
 
+                // Date/time functions
+                "extract" | "date_part" => RustType::F64,
+                "date_trunc" => RustType::DateTime,
+                "age" => RustType::Duration,
+                "to_char" => RustType::String,
+                "to_date" => RustType::Date,
+                "to_timestamp" => RustType::DateTime,
+                "current_date" => RustType::Date,
+                "current_time" => RustType::Time,
+                "current_timestamp" | "localtimestamp" | "localtime" => RustType::DateTime,
+                "make_date" => RustType::Date,
+                "make_time" => RustType::Time,
+                "make_timestamp" | "make_timestamptz" => RustType::DateTime,
+                "make_interval" => RustType::Duration,
+
                 _ => RustType::Custom(func_name.clone()),
             };
 
@@ -565,6 +580,34 @@ fn infer_expr_type(
         Expr::Nested(inner) => {
             // Parenthesized expression
             infer_expr_type(schema, ctx, inner)
+        }
+        Expr::Extract { .. } => {
+            // EXTRACT(field FROM timestamp) returns f64
+            Ok(("extract".to_string(), RustType::F64))
+        }
+        Expr::Ceil { .. } => {
+            // CEIL can be numeric or date/time, return f64 as a reasonable default
+            Ok(("ceil".to_string(), RustType::F64))
+        }
+        Expr::Floor { .. } => {
+            // FLOOR can be numeric or date/time, return f64 as a reasonable default
+            Ok(("floor".to_string(), RustType::F64))
+        }
+        Expr::Position { .. } => {
+            // POSITION(substring IN string) returns i32
+            Ok(("position".to_string(), RustType::I32))
+        }
+        Expr::Substring { .. } => {
+            // SUBSTRING returns String
+            Ok(("substring".to_string(), RustType::String))
+        }
+        Expr::Trim { .. } => {
+            // TRIM returns String
+            Ok(("trim".to_string(), RustType::String))
+        }
+        Expr::Overlay { .. } => {
+            // OVERLAY returns String
+            Ok(("overlay".to_string(), RustType::String))
         }
         _ => {
             // Default to String for unknown expressions
@@ -1580,5 +1623,128 @@ mod tests {
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    // Date/time function tests
+
+    fn test_schema_with_timestamps() -> Schema {
+        Schema::from_sql(
+            r#"
+            CREATE TABLE orders (
+                id uuid NOT NULL,
+                user_id uuid NOT NULL,
+                created_at timestamp with time zone NOT NULL DEFAULT now(),
+                updated_at timestamp with time zone NOT NULL DEFAULT now()
+            );
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_validate_extract_returns_f64() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT id, EXTRACT(YEAR FROM created_at) as year FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "year");
+        assert_eq!(result.columns[1].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_extract_month() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT EXTRACT(MONTH FROM created_at) as month FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "month");
+        assert_eq!(result.columns[0].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_date_trunc_returns_datetime() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT DATE_TRUNC('day', created_at) as day FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "day");
+        assert_eq!(result.columns[0].rust_type, RustType::DateTime);
+    }
+
+    #[test]
+    fn test_validate_date_part_returns_f64() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT DATE_PART('hour', created_at) as hour FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "hour");
+        assert_eq!(result.columns[0].rust_type, RustType::F64);
+    }
+
+    #[test]
+    fn test_validate_age_returns_duration() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT AGE(updated_at, created_at) as duration FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "duration");
+        assert_eq!(result.columns[0].rust_type, RustType::Duration);
+    }
+
+    #[test]
+    fn test_validate_to_char_returns_string() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(
+            &schema,
+            "SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as formatted FROM orders",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "formatted");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_now_returns_datetime() {
+        let schema = test_schema_with_timestamps();
+        let result = validate_query(&schema, "SELECT NOW() as current_time FROM orders").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "current_time");
+        assert_eq!(result.columns[0].rust_type, RustType::DateTime);
+    }
+
+    #[test]
+    fn test_validate_position_returns_i32() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT POSITION('@' IN email) as pos FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "pos");
+        assert_eq!(result.columns[0].rust_type, RustType::I32);
     }
 }
