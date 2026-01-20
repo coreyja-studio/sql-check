@@ -668,13 +668,65 @@ fn test_delete_returning_all() {
 // }
 
 // --- String functions ---
-// Functions like UPPER, LOWER, CONCAT return unknown types.
-//
-// #[test]
-// fn test_upper_lower() {
-//     let q = query!("SELECT id, UPPER(name) as upper_name FROM users");
-//     assert!(q.sql().contains("UPPER"));
-// }
+// String functions now supported!
+
+#[test]
+fn test_upper_lower() {
+    let q = query!("SELECT id, UPPER(name) as upper_name, LOWER(name) as lower_name FROM users");
+    assert!(q.sql().contains("UPPER"));
+    assert!(q.sql().contains("LOWER"));
+}
+
+#[test]
+fn test_concat() {
+    let q = query!("SELECT id, CONCAT(name, ' - ', email) as full_info FROM users");
+    assert!(q.sql().contains("CONCAT"));
+}
+
+#[test]
+fn test_length() {
+    let q = query!("SELECT id, LENGTH(name) as name_length FROM users");
+    assert!(q.sql().contains("LENGTH"));
+}
+
+#[test]
+fn test_substring() {
+    let q = query!("SELECT id, SUBSTRING(name, 1, 3) as short_name FROM users");
+    assert!(q.sql().contains("SUBSTRING"));
+}
+
+#[test]
+fn test_trim_functions() {
+    let q = query!("SELECT id, TRIM(name) as trimmed_name, LTRIM(name) as ltrimmed, RTRIM(name) as rtrimmed FROM users");
+    assert!(q.sql().contains("TRIM"));
+    assert!(q.sql().contains("LTRIM"));
+    assert!(q.sql().contains("RTRIM"));
+}
+
+#[test]
+fn test_replace() {
+    let q = query!("SELECT id, REPLACE(name, 'old', 'new') as replaced_name FROM users");
+    assert!(q.sql().contains("REPLACE"));
+}
+
+#[test]
+fn test_strpos() {
+    // STRPOS is the function-call equivalent of POSITION in PostgreSQL
+    let q = query!("SELECT id, STRPOS(email, '@') as at_position FROM users");
+    assert!(q.sql().contains("STRPOS"));
+}
+
+#[test]
+fn test_split_part() {
+    let q = query!("SELECT id, SPLIT_PART(email, '@', 2) as domain FROM users");
+    assert!(q.sql().contains("SPLIT_PART"));
+}
+
+#[test]
+fn test_lpad_rpad() {
+    let q = query!("SELECT id, LPAD(name, 10, ' ') as padded_name FROM users");
+    assert!(q.sql().contains("LPAD"));
+}
 
 // --- UNION / INTERSECT / EXCEPT ---
 // Set operations are not yet supported.
