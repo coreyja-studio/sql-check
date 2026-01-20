@@ -348,8 +348,10 @@ fn resolve_table_factor(
             // Check if this is a CTE reference first
             if ctx.get_cte(&table_name).is_some() {
                 // It's a CTE - use the special marker "_cte:<name>"
-                ctx.table_aliases
-                    .insert(alias_name.to_lowercase(), format!("_cte:{}", table_name.to_lowercase()));
+                ctx.table_aliases.insert(
+                    alias_name.to_lowercase(),
+                    format!("_cte:{}", table_name.to_lowercase()),
+                );
             } else {
                 // Not a CTE - verify table exists in schema
                 if !schema.has_table(&table_name) {
@@ -529,7 +531,9 @@ fn infer_expr_type(
                 "regexp_replace" | "regexp_substr" | "regexp_match" => RustType::String,
 
                 // String functions that return integers
-                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => RustType::I32,
+                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
+                    RustType::I32
+                }
                 "position" | "strpos" => RustType::I32,
                 "ascii" => RustType::I32,
 
@@ -641,7 +645,11 @@ fn find_column_in_ctes(ctx: &ResolveContext, col_name: &str) -> Option<(String, 
     for (alias, table_ref) in &ctx.table_aliases {
         if let Some(cte_name) = table_ref.strip_prefix("_cte:") {
             if let Some(cte) = ctx.get_cte(cte_name) {
-                if let Some(col) = cte.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name)) {
+                if let Some(col) = cte
+                    .columns
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(col_name))
+                {
                     if found.is_some() {
                         // Ambiguous - but we return None and let find_column_in_tables handle it
                         // (though it won't find anything, leading to proper error)
@@ -847,7 +855,9 @@ fn extract_assignment_target_columns(target: &AssignmentTarget) -> Result<Vec<St
                 .last()
                 .and_then(|part| part.as_ident())
                 .map(|i| i.value.clone())
-                .ok_or_else(|| Error::InvalidQuery("Empty column name in assignment".to_string()))?;
+                .ok_or_else(|| {
+                    Error::InvalidQuery("Empty column name in assignment".to_string())
+                })?;
             Ok(vec![col_name])
         }
         AssignmentTarget::Tuple(obj_names) => {
@@ -1183,8 +1193,7 @@ mod tests {
     #[test]
     fn test_validate_update_with_where() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2").unwrap();
+        let result = validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2").unwrap();
 
         assert_eq!(result.columns.len(), 0);
     }
@@ -1208,9 +1217,11 @@ mod tests {
     #[test]
     fn test_validate_update_returning_all() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2 RETURNING *")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "UPDATE users SET name = $1 WHERE id = $2 RETURNING *",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 4); // id, name, email, metadata
         assert_eq!(result.columns[0].name, "id");
@@ -1255,8 +1266,11 @@ mod tests {
     #[test]
     fn test_validate_delete_returning() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "DELETE FROM users WHERE id = $1 RETURNING id, name").unwrap();
+        let result = validate_query(
+            &schema,
+            "DELETE FROM users WHERE id = $1 RETURNING id, name",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "id");
@@ -1532,9 +1546,11 @@ mod tests {
     #[test]
     fn test_validate_upper_lower() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT UPPER(name) as upper_name, LOWER(name) as lower_name FROM users")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "SELECT UPPER(name) as upper_name, LOWER(name) as lower_name FROM users",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "upper_name");
@@ -1546,8 +1562,8 @@ mod tests {
     #[test]
     fn test_validate_concat() {
         let schema = test_schema();
-        let result = validate_query(&schema, "SELECT CONCAT(name, email) as combined FROM users")
-            .unwrap();
+        let result =
+            validate_query(&schema, "SELECT CONCAT(name, email) as combined FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "combined");
@@ -1557,8 +1573,7 @@ mod tests {
     #[test]
     fn test_validate_length_returns_i32() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT LENGTH(name) as name_len FROM users").unwrap();
+        let result = validate_query(&schema, "SELECT LENGTH(name) as name_len FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "name_len");
@@ -1591,8 +1606,7 @@ mod tests {
     #[test]
     fn test_validate_char_length_returns_i32() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT CHAR_LENGTH(name) as len FROM users").unwrap();
+        let result = validate_query(&schema, "SELECT CHAR_LENGTH(name) as len FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "len");
@@ -1617,9 +1631,11 @@ mod tests {
     #[test]
     fn test_validate_replace() {
         let schema = test_schema();
-        let result =
-            validate_query(&schema, "SELECT REPLACE(name, 'a', 'b') as replaced FROM users")
-                .unwrap();
+        let result = validate_query(
+            &schema,
+            "SELECT REPLACE(name, 'a', 'b') as replaced FROM users",
+        )
+        .unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].rust_type, RustType::String);
