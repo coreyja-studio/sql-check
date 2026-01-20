@@ -523,81 +523,112 @@ fn infer_expr_type(
                 .map(|i| i.value.to_lowercase())
                 .unwrap_or_default();
 
-            let rust_type = match func_name.as_str() {
-                "count" => RustType::I64,
-                "sum" => {
-                    // SUM returns numeric for integers, or the argument type
-                    // For simplicity, always return Decimal (nullable for non-count aggregates)
-                    RustType::Option(Box::new(RustType::Decimal))
-                }
-                "avg" => RustType::Option(Box::new(RustType::Decimal)),
-                "min" | "max" => {
-                    // Return type matches argument type, but nullable
-                    if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
-                        // Strip existing Option if present, then wrap in Option
-                        let inner = match inner_type {
-                            RustType::Option(t) => *t,
-                            t => t,
-                        };
-                        RustType::Option(Box::new(inner))
-                    } else {
-                        RustType::Option(Box::new(RustType::String))
+            let rust_type =
+                match func_name.as_str() {
+                    "count" => RustType::I64,
+                    "sum" => {
+                        // SUM returns numeric for integers, or the argument type
+                        // For simplicity, always return Decimal (nullable for non-count aggregates)
+                        RustType::Option(Box::new(RustType::Decimal))
                     }
-                }
-                "coalesce" => {
-                    // COALESCE returns the type of arguments, non-null if any arg is non-null
-                    if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
-                        // Strip Option - COALESCE makes things non-null
-                        match inner_type {
-                            RustType::Option(t) => *t,
-                            t => t,
+                    "avg" => RustType::Option(Box::new(RustType::Decimal)),
+                    "min" | "max" => {
+                        // Return type matches argument type, but nullable
+                        if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
+                            // Strip existing Option if present, then wrap in Option
+                            let inner = match inner_type {
+                                RustType::Option(t) => *t,
+                                t => t,
+                            };
+                            RustType::Option(Box::new(inner))
+                        } else {
+                            RustType::Option(Box::new(RustType::String))
                         }
-                    } else {
-                        RustType::String
                     }
-                }
-                "now" => RustType::DateTime,
+                    "coalesce" => {
+                        // COALESCE returns the type of arguments, non-null if any arg is non-null
+                        if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
+                            // Strip Option - COALESCE makes things non-null
+                            match inner_type {
+                                RustType::Option(t) => *t,
+                                t => t,
+                            }
+                        } else {
+                            RustType::String
+                        }
+                    }
+                    "now" => RustType::DateTime,
 
-                // String functions that return String
-                "upper" | "lower" | "initcap" => RustType::String,
-                "concat" | "concat_ws" => RustType::String,
-                "substring" | "substr" | "left" | "right" => RustType::String,
-                "trim" | "ltrim" | "rtrim" | "btrim" => RustType::String,
-                "replace" | "translate" | "reverse" | "repeat" => RustType::String,
-                "lpad" | "rpad" => RustType::String,
-                "split_part" => RustType::String,
-                "overlay" | "format" => RustType::String,
-                "quote_ident" | "quote_literal" | "quote_nullable" => RustType::String,
-                "encode" | "decode" => RustType::String,
-                "md5" | "sha256" | "sha384" | "sha512" => RustType::String,
-                "to_hex" => RustType::String,
-                "chr" => RustType::String,
-                "regexp_replace" | "regexp_substr" | "regexp_match" => RustType::String,
+                    // String functions that return String
+                    "upper" | "lower" | "initcap" => RustType::String,
+                    "concat" | "concat_ws" => RustType::String,
+                    "substring" | "substr" | "left" | "right" => RustType::String,
+                    "trim" | "ltrim" | "rtrim" | "btrim" => RustType::String,
+                    "replace" | "translate" | "reverse" | "repeat" => RustType::String,
+                    "lpad" | "rpad" => RustType::String,
+                    "split_part" => RustType::String,
+                    "overlay" | "format" => RustType::String,
+                    "quote_ident" | "quote_literal" | "quote_nullable" => RustType::String,
+                    "encode" | "decode" => RustType::String,
+                    "md5" | "sha256" | "sha384" | "sha512" => RustType::String,
+                    "to_hex" => RustType::String,
+                    "chr" => RustType::String,
+                    "regexp_replace" | "regexp_substr" | "regexp_match" => RustType::String,
 
-                // String functions that return integers
-                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
-                    RustType::I32
-                }
-                "position" | "strpos" => RustType::I32,
-                "ascii" => RustType::I32,
+                    // String functions that return integers
+                    "length" | "char_length" | "character_length" | "octet_length"
+                    | "bit_length" => RustType::I32,
+                    "position" | "strpos" => RustType::I32,
+                    "ascii" => RustType::I32,
 
-                // Date/time functions
-                "extract" | "date_part" => RustType::F64,
-                "date_trunc" => RustType::DateTime,
-                "age" => RustType::Duration,
-                "to_char" => RustType::String,
-                "to_date" => RustType::Date,
-                "to_timestamp" => RustType::DateTime,
-                "current_date" => RustType::Date,
-                "current_time" => RustType::Time,
-                "current_timestamp" | "localtimestamp" | "localtime" => RustType::DateTime,
-                "make_date" => RustType::Date,
-                "make_time" => RustType::Time,
-                "make_timestamp" | "make_timestamptz" => RustType::DateTime,
-                "make_interval" => RustType::Duration,
+                    // Date/time functions
+                    "extract" | "date_part" => RustType::F64,
+                    "date_trunc" => RustType::DateTime,
+                    "age" => RustType::Duration,
+                    "to_char" => RustType::String,
+                    "to_date" => RustType::Date,
+                    "to_timestamp" => RustType::DateTime,
+                    "current_date" => RustType::Date,
+                    "current_time" => RustType::Time,
+                    "current_timestamp" | "localtimestamp" | "localtime" => RustType::DateTime,
+                    "make_date" => RustType::Date,
+                    "make_time" => RustType::Time,
+                    "make_timestamp" | "make_timestamptz" => RustType::DateTime,
+                    "make_interval" => RustType::Duration,
 
-                _ => RustType::Custom(func_name.clone()),
-            };
+                    // Window functions that return integers (ranking functions)
+                    "row_number" | "rank" | "dense_rank" | "ntile" | "cume_dist"
+                    | "percent_rank" => RustType::I64,
+
+                    // Window functions that return the argument type (nullable)
+                    // LAG and LEAD return the previous/next value, which may be NULL
+                    "lag" | "lead" => {
+                        if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
+                            // LAG/LEAD always return nullable since there may not be a previous/next row
+                            match inner_type {
+                                RustType::Option(_) => inner_type,
+                                t => RustType::Option(Box::new(t)),
+                            }
+                        } else {
+                            RustType::Option(Box::new(RustType::String))
+                        }
+                    }
+
+                    // Window functions that return the argument type
+                    "first_value" | "last_value" | "nth_value" => {
+                        if let Some(inner_type) = get_first_arg_type(schema, ctx, &func.args)? {
+                            // These return nullable because nth_value may not find a row
+                            match inner_type {
+                                RustType::Option(_) => inner_type,
+                                t => RustType::Option(Box::new(t)),
+                            }
+                        } else {
+                            RustType::Option(Box::new(RustType::String))
+                        }
+                    }
+
+                    _ => RustType::Custom(func_name.clone()),
+                };
 
             Ok((func_name, rust_type))
         }
@@ -648,7 +679,10 @@ fn infer_expr_type(
                 Ok(("?column?".to_string(), RustType::Vec(Box::new(elem_type))))
             } else {
                 // Empty array - default to Vec<String>
-                Ok(("?column?".to_string(), RustType::Vec(Box::new(RustType::String))))
+                Ok((
+                    "?column?".to_string(),
+                    RustType::Vec(Box::new(RustType::String)),
+                ))
             }
         }
         Expr::InList { .. } => {
@@ -1985,11 +2019,8 @@ mod tests {
     fn test_validate_any_operator() {
         let schema = test_schema_with_arrays();
         // $1 = ANY(tags) returns boolean, but we're selecting id
-        let result = validate_query(
-            &schema,
-            "SELECT id FROM products WHERE $1 = ANY(tags)",
-        )
-        .unwrap();
+        let result =
+            validate_query(&schema, "SELECT id FROM products WHERE $1 = ANY(tags)").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "id");
@@ -2061,11 +2092,8 @@ mod tests {
     fn test_validate_array_literal() {
         let schema = test_schema();
         // Test selecting an array literal
-        let result = validate_query(
-            &schema,
-            "SELECT ARRAY['a', 'b', 'c'] as arr FROM users",
-        )
-        .unwrap();
+        let result =
+            validate_query(&schema, "SELECT ARRAY['a', 'b', 'c'] as arr FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "arr");
@@ -2088,5 +2116,144 @@ mod tests {
         assert_eq!(result.columns.len(), 2);
         assert_eq!(result.columns[0].name, "id");
         assert_eq!(result.columns[1].name, "name");
+    }
+
+    // Window function tests
+
+    #[test]
+    fn test_validate_row_number() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, name, ROW_NUMBER() OVER (ORDER BY name) as row_num FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        assert_eq!(result.columns[2].name, "row_num");
+        // ROW_NUMBER returns i64
+        assert_eq!(result.columns[2].rust_type, RustType::I64);
+    }
+
+    #[test]
+    fn test_validate_rank() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, RANK() OVER (ORDER BY name) as rank FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "rank");
+        assert_eq!(result.columns[1].rust_type, RustType::I64);
+    }
+
+    #[test]
+    fn test_validate_dense_rank() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, DENSE_RANK() OVER (ORDER BY name) as dense_rank FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "dense_rank");
+        assert_eq!(result.columns[1].rust_type, RustType::I64);
+    }
+
+    #[test]
+    fn test_validate_lag_returns_nullable() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, LAG(name) OVER (ORDER BY name) as prev_name FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "prev_name");
+        // LAG returns Option because there may not be a previous row
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_lead_returns_nullable() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, LEAD(name) OVER (ORDER BY name) as next_name FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "next_name");
+        // LEAD returns Option because there may not be a next row
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_first_value() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, FIRST_VALUE(name) OVER (ORDER BY name) as first FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "first");
+        // FIRST_VALUE returns Option
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_last_value() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, LAST_VALUE(name) OVER (ORDER BY name) as last FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[1].name, "last");
+        // LAST_VALUE returns Option
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_window_with_partition() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT id, name,
+                   ROW_NUMBER() OVER (PARTITION BY email ORDER BY name) as row_num
+            FROM users
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns[2].name, "row_num");
+        assert_eq!(result.columns[2].rust_type, RustType::I64);
     }
 }
