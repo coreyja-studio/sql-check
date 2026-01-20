@@ -10,7 +10,6 @@
 //! Known limitations (tests commented out):
 //! - CTEs: WITH clause table resolution not implemented
 //! - UPDATE/DELETE: Only SELECT and INSERT are supported
-//! - Decimal types: Requires postgres-types with-rust_decimal-1 feature
 //! - Window functions: ROW_NUMBER, RANK, etc. not supported
 //! - UNION/INTERSECT/EXCEPT: Set operations not supported
 //! - RIGHT JOIN/FULL OUTER JOIN/CROSS JOIN: Not yet tested
@@ -612,14 +611,41 @@ fn test_now_function() {
 // }
 
 // --- Decimal columns ---
-// Columns with numeric(10,2) type require postgres-types with-rust_decimal-1.
-// Tests selecting price, total_amount, unit_price are commented out.
-//
-// #[test]
-// fn test_products_with_price() {
-//     let q = query!("SELECT id, name, price FROM products");
-//     assert!(q.sql().contains("price"));
-// }
+// Columns with numeric(10,2) type now supported via tokio-postgres with-rust_decimal-1 feature.
+
+#[test]
+fn test_products_with_price() {
+    let q = query!("SELECT id, name, price FROM products");
+    assert!(q.sql().contains("price"));
+}
+
+#[test]
+fn test_orders_total_amount() {
+    let q = query!("SELECT id, user_id, total_amount FROM orders");
+    assert!(q.sql().contains("total_amount"));
+}
+
+#[test]
+fn test_order_items_unit_price() {
+    let q = query!("SELECT id, order_id, quantity, unit_price FROM order_items");
+    assert!(q.sql().contains("unit_price"));
+}
+
+#[test]
+fn test_select_all_decimal_columns() {
+    // Test selecting all decimal columns together
+    let q = query!(
+        r#"
+        SELECT p.price, o.total_amount, oi.unit_price
+        FROM products p
+        INNER JOIN order_items oi ON oi.product_id = p.id
+        INNER JOIN orders o ON o.id = oi.order_id
+        "#
+    );
+    assert!(q.sql().contains("price"));
+    assert!(q.sql().contains("total_amount"));
+    assert!(q.sql().contains("unit_price"));
+}
 
 // --- SUM/AVG aggregates ---
 // SUM and AVG always return Decimal, even on integer columns.
