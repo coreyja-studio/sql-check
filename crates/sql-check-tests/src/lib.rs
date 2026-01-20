@@ -14,8 +14,7 @@
 //! - DELETE (with RETURNING)
 //!
 //! Known limitations (tests commented out):
-//! - Window functions: ROW_NUMBER, RANK, etc. not supported
-//! - Array operations: ANY, array overlap not tested
+//! - (none currently)
 
 // The query! macro is used in tests below, but clippy doesn't see proc macro usage
 #[allow(unused_imports)]
@@ -656,15 +655,68 @@ fn test_delete_returning_all() {
 }
 
 // --- Window functions ---
-// Window functions return unknown types (function name as type).
-//
-// #[test]
-// fn test_row_number() {
-//     let q = query!(
-//         "SELECT id, name, ROW_NUMBER() OVER (ORDER BY created_at) as row_num FROM users"
-//     );
-//     assert!(q.sql().contains("ROW_NUMBER"));
-// }
+// Window functions are now supported!
+
+#[test]
+fn test_row_number() {
+    let q =
+        query!("SELECT id, name, ROW_NUMBER() OVER (ORDER BY created_at) as row_num FROM users");
+    assert!(q.sql().contains("ROW_NUMBER"));
+}
+
+#[test]
+fn test_rank() {
+    let q = query!("SELECT id, name, RANK() OVER (ORDER BY created_at) as rank FROM users");
+    assert!(q.sql().contains("RANK"));
+}
+
+#[test]
+fn test_dense_rank() {
+    let q =
+        query!("SELECT id, name, DENSE_RANK() OVER (ORDER BY created_at) as dense_rank FROM users");
+    assert!(q.sql().contains("DENSE_RANK"));
+}
+
+#[test]
+fn test_lag() {
+    let q = query!("SELECT id, name, LAG(name) OVER (ORDER BY created_at) as prev_name FROM users");
+    assert!(q.sql().contains("LAG"));
+}
+
+#[test]
+fn test_lead() {
+    let q =
+        query!("SELECT id, name, LEAD(name) OVER (ORDER BY created_at) as next_name FROM users");
+    assert!(q.sql().contains("LEAD"));
+}
+
+#[test]
+fn test_first_value() {
+    let q = query!(
+        "SELECT id, name, FIRST_VALUE(name) OVER (ORDER BY created_at) as first_name FROM users"
+    );
+    assert!(q.sql().contains("FIRST_VALUE"));
+}
+
+#[test]
+fn test_last_value() {
+    let q = query!(
+        "SELECT id, name, LAST_VALUE(name) OVER (ORDER BY created_at) as last_name FROM users"
+    );
+    assert!(q.sql().contains("LAST_VALUE"));
+}
+
+#[test]
+fn test_window_with_partition() {
+    let q = query!(
+        r#"
+        SELECT id, name,
+               ROW_NUMBER() OVER (PARTITION BY email ORDER BY created_at) as row_num
+        FROM users
+        "#
+    );
+    assert!(q.sql().contains("PARTITION BY"));
+}
 
 // --- String functions ---
 // String functions now supported!
