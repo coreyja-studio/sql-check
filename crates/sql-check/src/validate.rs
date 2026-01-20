@@ -50,15 +50,23 @@ pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
 struct ResolveContext {
     /// Map from alias/table name -> table name in schema
     table_aliases: HashMap<String, String>,
-    /// Tables that are LEFT JOINed (columns from these are nullable)
-    left_joined_tables: Vec<String>,
+    /// Tables whose columns are nullable due to JOIN type
+    /// (right side of LEFT JOIN, left side of RIGHT JOIN, both sides of FULL OUTER JOIN)
+    nullable_tables: Vec<String>,
 }
 
 impl ResolveContext {
     fn is_nullable_table(&self, table: &str) -> bool {
-        self.left_joined_tables
+        self.nullable_tables
             .iter()
             .any(|t| t.eq_ignore_ascii_case(table))
+    }
+
+    fn mark_nullable(&mut self, table: &str) {
+        let lower = table.to_lowercase();
+        if !self.nullable_tables.iter().any(|t| t == &lower) {
+            self.nullable_tables.push(lower);
+        }
     }
 }
 
@@ -167,27 +175,76 @@ fn resolve_table_refs(
     twj: &TableWithJoins,
     ctx: &mut ResolveContext,
 ) -> Result<()> {
+    // Get the alias of the first (left) table - we need this for RIGHT JOIN and FULL OUTER
+    let first_table_alias = get_table_alias(&twj.relation);
+
     // Process the main table
-    resolve_table_factor(schema, &twj.relation, ctx, false)?;
+    resolve_table_factor(schema, &twj.relation, ctx)?;
 
     // Process JOINs
     for join in &twj.joins {
-        let is_left_join = matches!(
-            join.join_operator,
-            JoinOperator::LeftOuter(_) | JoinOperator::LeftSemi(_) | JoinOperator::LeftAnti(_)
-        );
-        resolve_table_factor(schema, &join.relation, ctx, is_left_join)?;
+        match &join.join_operator {
+            // LEFT JOIN: right table columns are nullable
+            JoinOperator::Left(_)
+            | JoinOperator::LeftOuter(_)
+            | JoinOperator::LeftSemi(_)
+            | JoinOperator::LeftAnti(_) => {
+                resolve_table_factor(schema, &join.relation, ctx)?;
+                if let Some(alias) = get_table_alias(&join.relation) {
+                    ctx.mark_nullable(&alias);
+                }
+            }
+            // RIGHT JOIN: left (first) table columns are nullable
+            JoinOperator::Right(_)
+            | JoinOperator::RightOuter(_)
+            | JoinOperator::RightSemi(_)
+            | JoinOperator::RightAnti(_) => {
+                resolve_table_factor(schema, &join.relation, ctx)?;
+                if let Some(ref alias) = first_table_alias {
+                    ctx.mark_nullable(alias);
+                }
+            }
+            // FULL OUTER JOIN: both tables' columns are nullable
+            JoinOperator::FullOuter(_) => {
+                resolve_table_factor(schema, &join.relation, ctx)?;
+                if let Some(ref alias) = first_table_alias {
+                    ctx.mark_nullable(alias);
+                }
+                if let Some(alias) = get_table_alias(&join.relation) {
+                    ctx.mark_nullable(&alias);
+                }
+            }
+            // INNER JOIN, CROSS JOIN: no nullability changes
+            _ => {
+                resolve_table_factor(schema, &join.relation, ctx)?;
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Resolve a single table factor.
+/// Get the alias (or table name) from a TableFactor.
+fn get_table_alias(factor: &TableFactor) -> Option<String> {
+    match factor {
+        TableFactor::Table { name, alias, .. } => {
+            alias.as_ref().map(|a| a.name.value.clone()).or_else(|| {
+                name.0
+                    .last()
+                    .and_then(|part| part.as_ident())
+                    .map(|i| i.value.clone())
+            })
+        }
+        TableFactor::Derived { alias: Some(a), .. } => Some(a.name.value.clone()),
+        _ => None,
+    }
+}
+
+/// Resolve a single table factor (register it in context).
 fn resolve_table_factor(
     schema: &Schema,
     factor: &TableFactor,
     ctx: &mut ResolveContext,
-    is_left_joined: bool,
 ) -> Result<()> {
     match factor {
         TableFactor::Table { name, alias, .. } => {
@@ -211,10 +268,6 @@ fn resolve_table_factor(
 
             ctx.table_aliases
                 .insert(alias_name.to_lowercase(), table_name.clone());
-
-            if is_left_joined {
-                ctx.left_joined_tables.push(alias_name.to_lowercase());
-            }
         }
         TableFactor::Derived { alias: Some(a), .. } => {
             // Subquery - for now, just track the alias
@@ -600,5 +653,141 @@ mod tests {
         assert_eq!(result.columns[0].rust_type, RustType::Uuid);
         assert_eq!(result.columns[1].name, "name");
         assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_right_join_nullability() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT u.id, u.name, p.bio
+            FROM users u
+            RIGHT JOIN profiles p ON p.user_id = u.id
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        // u.id - nullable (users is on left side of RIGHT JOIN)
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Uuid))
+        );
+        // u.name - nullable (users is on left side of RIGHT JOIN)
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+        // p.bio - nullable (bio is nullable in schema, but profiles is not nullable from JOIN)
+        assert_eq!(
+            result.columns[2].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_right_join_non_nullable_column() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT u.id, p.id as profile_id
+            FROM users u
+            RIGHT JOIN profiles p ON p.user_id = u.id
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        // u.id - nullable (users is on left side of RIGHT JOIN)
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Uuid))
+        );
+        // p.id - NOT nullable (profiles is on right side of RIGHT JOIN, id is NOT NULL in schema)
+        assert_eq!(result.columns[1].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_full_outer_join_nullability() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT u.id, u.name, p.id as profile_id, p.bio
+            FROM users u
+            FULL OUTER JOIN profiles p ON p.user_id = u.id
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 4);
+        // u.id - nullable (FULL OUTER JOIN makes both sides nullable)
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Uuid))
+        );
+        // u.name - nullable
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+        // p.id - nullable (even though NOT NULL in schema, FULL OUTER makes it nullable)
+        assert_eq!(
+            result.columns[2].rust_type,
+            RustType::Option(Box::new(RustType::Uuid))
+        );
+        // p.bio - nullable (already nullable in schema + FULL OUTER)
+        assert_eq!(
+            result.columns[3].rust_type,
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_cross_join() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT u.id, u.name, p.id as profile_id
+            FROM users u
+            CROSS JOIN profiles p
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        // CROSS JOIN: neither side becomes nullable
+        // u.id - NOT nullable
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        // u.name - NOT nullable
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        // p.id - NOT nullable
+        assert_eq!(result.columns[2].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_inner_join_not_nullable() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT u.id, u.name, p.id as profile_id
+            FROM users u
+            INNER JOIN profiles p ON p.user_id = u.id
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        // INNER JOIN: neither side becomes nullable from the join itself
+        // u.id - NOT nullable
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        // u.name - NOT nullable
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        // p.id - NOT nullable
+        assert_eq!(result.columns[2].rust_type, RustType::Uuid);
     }
 }
