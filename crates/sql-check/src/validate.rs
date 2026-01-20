@@ -511,6 +511,28 @@ fn infer_expr_type(
                     }
                 }
                 "now" => RustType::DateTime,
+
+                // String functions that return String
+                "upper" | "lower" | "initcap" => RustType::String,
+                "concat" | "concat_ws" => RustType::String,
+                "substring" | "substr" | "left" | "right" => RustType::String,
+                "trim" | "ltrim" | "rtrim" | "btrim" => RustType::String,
+                "replace" | "translate" | "reverse" | "repeat" => RustType::String,
+                "lpad" | "rpad" => RustType::String,
+                "split_part" => RustType::String,
+                "overlay" | "format" => RustType::String,
+                "quote_ident" | "quote_literal" | "quote_nullable" => RustType::String,
+                "encode" | "decode" => RustType::String,
+                "md5" | "sha256" | "sha384" | "sha512" => RustType::String,
+                "to_hex" => RustType::String,
+                "chr" => RustType::String,
+                "regexp_replace" | "regexp_substr" | "regexp_match" => RustType::String,
+
+                // String functions that return integers
+                "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => RustType::I32,
+                "position" | "strpos" => RustType::I32,
+                "ascii" => RustType::I32,
+
                 _ => RustType::Custom(func_name.clone()),
             };
 
@@ -1460,5 +1482,103 @@ mod tests {
             result.columns[0].rust_type,
             RustType::Option(Box::new(RustType::Decimal))
         );
+    }
+
+    // String function tests
+
+    #[test]
+    fn test_validate_upper_lower() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT UPPER(name) as upper_name, LOWER(name) as lower_name FROM users")
+                .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "upper_name");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+        assert_eq!(result.columns[1].name, "lower_name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_concat() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "SELECT CONCAT(name, email) as combined FROM users")
+            .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "combined");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_length_returns_i32() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT LENGTH(name) as name_len FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "name_len");
+        assert_eq!(result.columns[0].rust_type, RustType::I32);
+    }
+
+    #[test]
+    fn test_validate_substring() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT SUBSTRING(name, 1, 3) as short FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "short");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_strpos_returns_i32() {
+        let schema = test_schema();
+        // Use STRPOS which is the function-call equivalent of POSITION
+        let result =
+            validate_query(&schema, "SELECT STRPOS(email, '@') as pos FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "pos");
+        assert_eq!(result.columns[0].rust_type, RustType::I32);
+    }
+
+    #[test]
+    fn test_validate_char_length_returns_i32() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT CHAR_LENGTH(name) as len FROM users").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "len");
+        assert_eq!(result.columns[0].rust_type, RustType::I32);
+    }
+
+    #[test]
+    fn test_validate_trim_functions() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT TRIM(name) as t, LTRIM(name) as lt, RTRIM(name) as rt FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+        assert_eq!(result.columns[2].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_replace() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "SELECT REPLACE(name, 'a', 'b') as replaced FROM users")
+                .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].rust_type, RustType::String);
     }
 }
