@@ -3,14 +3,15 @@
 //! Requires a running Postgres with database `sql_check_test` and the schema loaded.
 //! Run: `cat crates/sql-check-tests/schema.sql | sudo -u postgres psql -d sql_check_test`
 //!
-//! Note: Run with `--test-threads=1` to avoid race conditions between tests:
-//! `cargo test -p sql-check-tests --test integration -- --test-threads=1`
+//! Tests are marked with `#[serial]` to prevent race conditions from
+//! tests cleaning up shared tables in parallel.
 //!
 //! Known limitations (tests commented out or skipped):
 //! - Decimal columns: Requires postgres-types with-rust_decimal-1 feature
 //! - CTEs (WITH clause): Table resolution not implemented
 //! - Subqueries in FROM: Same issue as CTEs
 
+use serial_test::serial;
 use sql_check_macros::query;
 use tokio_postgres::NoTls;
 
@@ -39,6 +40,7 @@ async fn connect() -> tokio_postgres::Client {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_insert_and_select_user() {
     let client = connect().await;
 
@@ -74,6 +76,7 @@ async fn test_insert_and_select_user() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_select_all_users() {
     let client = connect().await;
 
@@ -127,6 +130,7 @@ async fn test_select_all_users() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_left_join_with_nullable() {
     let client = connect().await;
 
@@ -180,6 +184,7 @@ async fn test_left_join_with_nullable() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_fetch_optional() {
     let client = connect().await;
 
@@ -220,6 +225,7 @@ async fn test_fetch_optional() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_inner_join() {
     let client = connect().await;
 
@@ -269,6 +275,7 @@ async fn test_inner_join() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_count_aggregate() {
     let client = connect().await;
 
@@ -285,6 +292,7 @@ async fn test_count_aggregate() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_group_by() {
     let client = connect().await;
 
@@ -363,6 +371,7 @@ async fn test_group_by() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_distinct() {
     let client = connect().await;
 
@@ -381,6 +390,7 @@ async fn test_distinct() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_order_by() {
     let client = connect().await;
 
@@ -395,6 +405,7 @@ async fn test_order_by() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_limit() {
     let client = connect().await;
 
@@ -406,6 +417,7 @@ async fn test_limit() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_limit_offset() {
     let client = connect().await;
 
@@ -432,6 +444,7 @@ async fn test_limit_offset() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_insert_returning() {
     let client = connect().await;
 
@@ -457,6 +470,7 @@ async fn test_insert_returning() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_insert_returning_all() {
     let client = connect().await;
 
@@ -485,6 +499,7 @@ async fn test_insert_returning_all() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_subquery_in_where() {
     let client = connect().await;
 
@@ -507,6 +522,7 @@ async fn test_subquery_in_where() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_nullable_column_handling() {
     let client = connect().await;
 
@@ -542,6 +558,7 @@ async fn test_nullable_column_handling() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_coalesce() {
     let client = connect().await;
 
@@ -562,6 +579,7 @@ async fn test_coalesce() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_self_join() {
     let client = connect().await;
 
@@ -618,6 +636,7 @@ async fn test_self_join() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_where_and_or() {
     let client = connect().await;
 
@@ -634,6 +653,7 @@ async fn test_where_and_or() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_where_like() {
     let client = connect().await;
 
@@ -643,6 +663,7 @@ async fn test_where_like() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_where_in() {
     let client = connect().await;
 
@@ -652,6 +673,7 @@ async fn test_where_in() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_where_between() {
     let client = connect().await;
 
@@ -667,6 +689,7 @@ async fn test_where_between() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_where_is_null() {
     let client = connect().await;
 
@@ -675,6 +698,7 @@ async fn test_where_is_null() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_where_is_not_null() {
     let client = connect().await;
 
@@ -687,6 +711,7 @@ async fn test_where_is_not_null() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_exists() {
     let client = connect().await;
 
@@ -701,6 +726,7 @@ async fn test_exists() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_not_exists() {
     let client = connect().await;
 
@@ -719,6 +745,7 @@ async fn test_not_exists() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_case_expression() {
     let client = connect().await;
 
@@ -746,6 +773,7 @@ async fn test_case_expression() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_cast_expression() {
     let client = connect().await;
 
@@ -768,6 +796,7 @@ async fn test_cast_expression() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_right_join() {
     let client = connect().await;
 
@@ -828,6 +857,7 @@ async fn test_right_join() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_full_outer_join() {
     let client = connect().await;
 
@@ -884,6 +914,7 @@ async fn test_full_outer_join() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_cross_join() {
     let client = connect().await;
 
