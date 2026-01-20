@@ -11,9 +11,10 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 ### Working Features
 
 - ✅ **SELECT** statements with column validation
-- ✅ **INSERT** statements with column validation
-- ✅ **INSERT ... RETURNING**
-- ✅ **JOINs**: INNER JOIN, LEFT JOIN (with nullability inference)
+- ✅ **INSERT** statements with column validation and RETURNING
+- ✅ **UPDATE** statements with column validation and RETURNING
+- ✅ **DELETE** statements with RETURNING
+- ✅ **JOINs**: INNER, LEFT, RIGHT, FULL OUTER, CROSS (with nullability inference)
 - ✅ **Multiple JOINs** and **self-joins**
 - ✅ **Aggregate functions**: COUNT (returns i64)
 - ✅ **MIN/MAX** on text and integer columns
@@ -28,20 +29,18 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ✅ **CAST expressions** and PostgreSQL `::type` syntax
 - ✅ **NOW()** function
 - ✅ **Parameters** with `$1`, `$2`, etc.
-- ✅ **Type inference** from schema (UUID, text, jsonb, timestamp, boolean, integer, etc.)
-- ✅ **Nullability inference** from LEFT JOIN
+- ✅ **Type inference** from schema (UUID, text, jsonb, timestamp, boolean, integer, decimal, etc.)
+- ✅ **Nullability inference** from LEFT/RIGHT/FULL OUTER JOINs
+- ✅ **Decimal/Numeric columns** (via rust_decimal)
 
 ### Known Limitations
 
-- ❌ **UPDATE** and **DELETE** statements (only SELECT/INSERT supported)
 - ❌ **CTEs** (WITH clause) - table names from WITH not recognized
 - ❌ **Subqueries in FROM** - same issue as CTEs
-- ❌ **Decimal/Numeric columns** - requires postgres-types feature not yet integrated
 - ❌ **SUM/AVG aggregates** - always return Decimal
 - ❌ **Window functions** (ROW_NUMBER, RANK, LAG, LEAD, etc.)
 - ❌ **String functions** (UPPER, LOWER, CONCAT, SUBSTRING, LENGTH)
 - ❌ **Date functions** (EXTRACT, DATE_TRUNC)
-- ❌ **RIGHT JOIN**, **FULL OUTER JOIN**, **CROSS JOIN**
 - ❌ **UNION**, **INTERSECT**, **EXCEPT**
 - ❌ **Array operations** (ANY, array overlap)
 
@@ -89,7 +88,7 @@ pg_dump --schema-only mydb > schema.sql
 
 ## Test Coverage
 
-### Unit Tests (43 tests)
+### Unit Tests (54 tests)
 Compile-time validation tests that verify the `query!` macro correctly parses and validates SQL without needing a database.
 
 ### Compile-Fail Tests (6 tests)
@@ -97,7 +96,6 @@ Tests using trybuild to verify that invalid SQL produces proper compile-time err
 - Unknown table names
 - Unknown column names
 - Parameter count mismatches
-- Unsupported statements (UPDATE/DELETE)
 - Invalid SQL syntax
 
 ### Integration Tests (27 tests)
