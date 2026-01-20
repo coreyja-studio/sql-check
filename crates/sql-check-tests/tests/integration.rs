@@ -601,8 +601,8 @@ async fn test_self_join() {
     assert_eq!(result.id, child_id);
     assert_eq!(result.name, "Laptops");
     // parent_name should be "Electronics" (LEFT JOIN returned a match)
-    // The type may or may not be Option depending on validation implementation
-    assert!(result.parent_name.contains("Electronics"));
+    // It's Option<String> because p is LEFT JOINed
+    assert_eq!(result.parent_name, Some("Electronics".to_string()));
 }
 
 // ============================================================================
@@ -757,6 +757,179 @@ async fn test_cast_expression() {
     for result in results {
         // stock_text should be a numeric string
         assert!(result.stock_text.parse::<i32>().is_ok());
+    }
+}
+
+// ============================================================================
+// RIGHT JOIN tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_right_join() {
+    let client = connect().await;
+
+    // Clean up
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    // Insert a profile first (we'll create a user for it)
+    let user_id = uuid::Uuid::new_v4();
+    let profile_id = uuid::Uuid::new_v4();
+
+    client
+        .execute(
+            "INSERT INTO users (id, name, email, metadata) VALUES ($1, $2, $3, $4)",
+            &[
+                &user_id,
+                &"RightJoinUser".to_string(),
+                &format!("rightjoin-{}@example.com", user_id),
+                &serde_json::json!({}),
+            ],
+        )
+        .await
+        .unwrap();
+
+    client
+        .execute(
+            "INSERT INTO profiles (id, user_id, bio) VALUES ($1, $2, $3)",
+            &[&profile_id, &user_id, &"Test bio".to_string()],
+        )
+        .await
+        .unwrap();
+
+    // RIGHT JOIN - users columns should be Option because they might not exist
+    // for profiles without users (though FK prevents that in this schema)
+    let q = query!(
+        r#"
+        SELECT u.id as user_id, u.name, p.id as profile_id, p.bio
+        FROM users u
+        RIGHT JOIN profiles p ON p.user_id = u.id
+        WHERE p.id = $1
+        "#,
+        profile_id
+    );
+    let result = q.fetch_one(&client).await.unwrap();
+
+    // u.id is Option<Uuid> due to RIGHT JOIN
+    assert_eq!(result.user_id, Some(user_id));
+    // u.name is Option<String> due to RIGHT JOIN
+    assert_eq!(result.name, Some("RightJoinUser".to_string()));
+    // p.id is Uuid (not nullable from the join)
+    assert_eq!(result.profile_id, profile_id);
+    // p.bio is Option<String> (nullable in schema)
+    assert_eq!(result.bio, Some("Test bio".to_string()));
+}
+
+// ============================================================================
+// FULL OUTER JOIN tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_full_outer_join() {
+    let client = connect().await;
+
+    // Clean up
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    // Insert a user with a profile
+    let user_id = uuid::Uuid::new_v4();
+    let profile_id = uuid::Uuid::new_v4();
+
+    client
+        .execute(
+            "INSERT INTO users (id, name, email, metadata) VALUES ($1, $2, $3, $4)",
+            &[
+                &user_id,
+                &"FullOuterUser".to_string(),
+                &format!("fullouter-{}@example.com", user_id),
+                &serde_json::json!({}),
+            ],
+        )
+        .await
+        .unwrap();
+
+    client
+        .execute(
+            "INSERT INTO profiles (id, user_id, bio) VALUES ($1, $2, $3)",
+            &[&profile_id, &user_id, &"FULL OUTER bio".to_string()],
+        )
+        .await
+        .unwrap();
+
+    // FULL OUTER JOIN - both sides' columns should be Option
+    let q = query!(
+        r#"
+        SELECT u.id as user_id, u.name, p.id as profile_id, p.bio
+        FROM users u
+        FULL OUTER JOIN profiles p ON p.user_id = u.id
+        WHERE u.id = $1
+        "#,
+        user_id
+    );
+    let result = q.fetch_one(&client).await.unwrap();
+
+    // All columns are Option due to FULL OUTER JOIN
+    assert_eq!(result.user_id, Some(user_id));
+    assert_eq!(result.name, Some("FullOuterUser".to_string()));
+    assert_eq!(result.profile_id, Some(profile_id));
+    assert_eq!(result.bio, Some("FULL OUTER bio".to_string()));
+}
+
+// ============================================================================
+// CROSS JOIN tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_cross_join() {
+    let client = connect().await;
+
+    // Clean up
+    client.execute("DELETE FROM order_items", &[]).await.unwrap();
+    client.execute("DELETE FROM orders", &[]).await.unwrap();
+    client.execute("DELETE FROM products", &[]).await.unwrap();
+    client.execute("DELETE FROM categories", &[]).await.unwrap();
+
+    // Insert some categories
+    let cat1 = uuid::Uuid::new_v4();
+    let cat2 = uuid::Uuid::new_v4();
+
+    client
+        .execute(
+            "INSERT INTO categories (id, name) VALUES ($1, $2)",
+            &[&cat1, &"Category A".to_string()],
+        )
+        .await
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO categories (id, name) VALUES ($1, $2)",
+            &[&cat2, &"Category B".to_string()],
+        )
+        .await
+        .unwrap();
+
+    // CROSS JOIN - cartesian product, neither side is nullable from the join
+    let q = query!(
+        r#"
+        SELECT c1.id as id1, c1.name as name1, c2.id as id2, c2.name as name2
+        FROM categories c1
+        CROSS JOIN categories c2
+        ORDER BY c1.name, c2.name
+        "#
+    );
+    let results = q.fetch_all(&client).await.unwrap();
+
+    // Should have 4 rows (2 x 2 cartesian product)
+    assert_eq!(results.len(), 4);
+
+    // All columns are NOT Option (CROSS JOIN doesn't make things nullable)
+    // Types are directly accessible without unwrapping
+    for result in &results {
+        let _ = result.id1; // Uuid, not Option<Uuid>
+        let _ = result.name1; // String, not Option<String>
+        let _ = result.id2; // Uuid
+        let _ = result.name2; // String
     }
 }
 

@@ -1,0 +1,2 @@
+[env]
+DATABASE_URL = "postgres:///sql_check_test?host=/var/run/postgresql"
