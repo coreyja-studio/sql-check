@@ -7,9 +7,14 @@
 //! - Ignored tests (compile): Marked #[ignore], can compile but not run
 //! - Ignored tests (no compile): Commented out because they fail at compile time
 //!
+//! Supported statements:
+//! - SELECT (with JOINs, aggregates, subqueries, etc.)
+//! - INSERT (with RETURNING)
+//! - UPDATE (with RETURNING)
+//! - DELETE (with RETURNING)
+//!
 //! Known limitations (tests commented out):
 //! - CTEs: WITH clause table resolution not implemented
-//! - UPDATE/DELETE: Only SELECT and INSERT are supported
 //! - Decimal types: Requires postgres-types with-rust_decimal-1 feature
 //! - Window functions: ROW_NUMBER, RANK, etc. not supported
 //! - UNION/INTERSECT/EXCEPT: Set operations not supported
@@ -548,26 +553,80 @@ fn test_now_function() {
 //     assert!(q.sql().contains("WITH"));
 // }
 
-// --- UPDATE statements ---
-// UPDATE is not yet supported - only SELECT and INSERT work.
-//
-// #[test]
-// fn test_update_simple() {
-//     let name = "Updated".to_string();
-//     let user_id = uuid::Uuid::new_v4();
-//     let q = query!("UPDATE users SET name = $1 WHERE id = $2", name, user_id);
-//     assert!(q.sql().contains("UPDATE"));
-// }
+// ============================================================================
+// UPDATE statement tests
+// ============================================================================
 
-// --- DELETE statements ---
-// DELETE is not yet supported - only SELECT and INSERT work.
-//
-// #[test]
-// fn test_delete_simple() {
-//     let user_id = uuid::Uuid::new_v4();
-//     let q = query!("DELETE FROM users WHERE id = $1", user_id);
-//     assert!(q.sql().contains("DELETE"));
-// }
+#[test]
+fn test_update_simple() {
+    let name = "Updated".to_string();
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!("UPDATE users SET name = $1 WHERE id = $2", name, user_id);
+    assert!(q.sql().contains("UPDATE"));
+}
+
+#[test]
+fn test_update_multiple_columns() {
+    let name = "Updated".to_string();
+    let email = "new@example.com".to_string();
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!(
+        "UPDATE users SET name = $1, email = $2 WHERE id = $3",
+        name,
+        email,
+        user_id
+    );
+    assert!(q.sql().contains("SET"));
+}
+
+#[test]
+fn test_update_returning() {
+    let name = "Updated".to_string();
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!(
+        "UPDATE users SET name = $1 WHERE id = $2 RETURNING id, name",
+        name,
+        user_id
+    );
+    assert!(q.sql().contains("RETURNING"));
+}
+
+#[test]
+fn test_update_returning_all() {
+    let name = "Updated".to_string();
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!(
+        "UPDATE users SET name = $1 WHERE id = $2 RETURNING *",
+        name,
+        user_id
+    );
+    assert!(q.sql().contains("RETURNING *"));
+}
+
+// ============================================================================
+// DELETE statement tests
+// ============================================================================
+
+#[test]
+fn test_delete_simple() {
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!("DELETE FROM users WHERE id = $1", user_id);
+    assert!(q.sql().contains("DELETE"));
+}
+
+#[test]
+fn test_delete_returning() {
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!("DELETE FROM users WHERE id = $1 RETURNING id, name", user_id);
+    assert!(q.sql().contains("RETURNING"));
+}
+
+#[test]
+fn test_delete_returning_all() {
+    let user_id = uuid::Uuid::new_v4();
+    let q = query!("DELETE FROM users WHERE id = $1 RETURNING *", user_id);
+    assert!(q.sql().contains("RETURNING *"));
+}
 
 // --- Window functions ---
 // Window functions return unknown types (function name as type).

@@ -4,8 +4,9 @@ use crate::error::{Error, Result};
 use crate::schema::Schema;
 use crate::types::RustType;
 use sqlparser::ast::{
-    Expr, FunctionArg, FunctionArgExpr, FunctionArguments, JoinOperator, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, TableWithJoins, Value,
+    AssignmentTarget, Delete, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
+    JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    Update, Value,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -39,8 +40,10 @@ pub fn validate_query(schema: &Schema, sql: &str) -> Result<QueryResult> {
     match &statements[0] {
         Statement::Query(query) => validate_select(schema, query),
         Statement::Insert(insert) => validate_insert(schema, insert),
+        Statement::Update(update) => validate_update(schema, update),
+        Statement::Delete(delete) => validate_delete(schema, delete),
         _ => Err(Error::InvalidQuery(
-            "Only SELECT and INSERT are supported".to_string(),
+            "Only SELECT, INSERT, UPDATE, and DELETE are supported".to_string(),
         )),
     }
 }
@@ -530,6 +533,167 @@ fn validate_insert(schema: &Schema, insert: &sqlparser::ast::Insert) -> Result<Q
     Ok(QueryResult { columns: vec![] })
 }
 
+/// Validate an UPDATE statement.
+fn validate_update(schema: &Schema, update: &Update) -> Result<QueryResult> {
+    // Get table name from the UPDATE target
+    let table_name = extract_table_name_from_table_with_joins(&update.table)?;
+
+    // Verify table exists
+    let table = schema
+        .get_table(&table_name)
+        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+
+    // Verify columns in SET clause exist
+    for assignment in &update.assignments {
+        let col_names = extract_assignment_target_columns(&assignment.target)?;
+        for col_name in col_names {
+            if !table.has_column(&col_name) {
+                return Err(Error::UnknownColumn {
+                    table: table_name.clone(),
+                    column: col_name,
+                });
+            }
+        }
+    }
+
+    // If there's a RETURNING clause, infer those types
+    if let Some(returning) = &update.returning {
+        let mut ctx = ResolveContext::default();
+        ctx.table_aliases
+            .insert(table_name.to_lowercase(), table_name.clone());
+
+        return infer_returning_types(schema, &ctx, &table, returning);
+    }
+
+    // No RETURNING - return empty result
+    Ok(QueryResult { columns: vec![] })
+}
+
+/// Validate a DELETE statement.
+fn validate_delete(schema: &Schema, delete: &Delete) -> Result<QueryResult> {
+    // Get table name from the FROM clause
+    let table_name = extract_table_name_from_delete_from(&delete.from)?;
+
+    // Verify table exists
+    let table = schema
+        .get_table(&table_name)
+        .ok_or_else(|| Error::UnknownTable(table_name.clone()))?;
+
+    // If there's a RETURNING clause, infer those types
+    if let Some(returning) = &delete.returning {
+        let mut ctx = ResolveContext::default();
+        ctx.table_aliases
+            .insert(table_name.to_lowercase(), table_name.clone());
+
+        return infer_returning_types(schema, &ctx, &table, returning);
+    }
+
+    // No RETURNING - return empty result
+    Ok(QueryResult { columns: vec![] })
+}
+
+/// Extract table name from TableWithJoins.
+fn extract_table_name_from_table_with_joins(twj: &TableWithJoins) -> Result<String> {
+    match &twj.relation {
+        TableFactor::Table { name, .. } => name
+            .0
+            .last()
+            .and_then(|part| part.as_ident())
+            .map(|i| i.value.clone())
+            .ok_or_else(|| Error::InvalidQuery("Empty table name".to_string())),
+        _ => Err(Error::InvalidQuery(
+            "Complex table expressions not supported in UPDATE".to_string(),
+        )),
+    }
+}
+
+/// Extract table name from DELETE's FromTable.
+fn extract_table_name_from_delete_from(from: &FromTable) -> Result<String> {
+    match from {
+        FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => {
+            if tables.is_empty() {
+                return Err(Error::InvalidQuery(
+                    "DELETE requires at least one table".to_string(),
+                ));
+            }
+            extract_table_name_from_table_with_joins(&tables[0])
+        }
+    }
+}
+
+/// Extract column names from an assignment target.
+fn extract_assignment_target_columns(target: &AssignmentTarget) -> Result<Vec<String>> {
+    match target {
+        AssignmentTarget::ColumnName(obj_name) => {
+            // Single column, e.g., `name = 'value'`
+            let col_name = obj_name
+                .0
+                .last()
+                .and_then(|part| part.as_ident())
+                .map(|i| i.value.clone())
+                .ok_or_else(|| Error::InvalidQuery("Empty column name in assignment".to_string()))?;
+            Ok(vec![col_name])
+        }
+        AssignmentTarget::Tuple(obj_names) => {
+            // Tuple of columns, e.g., `(a, b) = (1, 2)`
+            let mut cols = Vec::new();
+            for obj_name in obj_names {
+                let col_name = obj_name
+                    .0
+                    .last()
+                    .and_then(|part| part.as_ident())
+                    .map(|i| i.value.clone())
+                    .ok_or_else(|| {
+                        Error::InvalidQuery("Empty column name in tuple assignment".to_string())
+                    })?;
+                cols.push(col_name);
+            }
+            Ok(cols)
+        }
+    }
+}
+
+/// Infer types for a RETURNING clause.
+fn infer_returning_types(
+    schema: &Schema,
+    ctx: &ResolveContext,
+    table: &crate::schema::Table,
+    returning: &[SelectItem],
+) -> Result<QueryResult> {
+    let mut columns = Vec::new();
+
+    for item in returning {
+        match item {
+            SelectItem::UnnamedExpr(expr) => {
+                let (name, rust_type) = infer_expr_type(schema, ctx, expr)?;
+                columns.push(QueryColumn { name, rust_type });
+            }
+            SelectItem::ExprWithAlias { expr, alias } => {
+                let (_, rust_type) = infer_expr_type(schema, ctx, expr)?;
+                columns.push(QueryColumn {
+                    name: alias.value.clone(),
+                    rust_type,
+                });
+            }
+            SelectItem::Wildcard(_) => {
+                for col in &table.columns {
+                    let mut rust_type = col.data_type.to_rust_type();
+                    if col.nullable {
+                        rust_type = rust_type.nullable();
+                    }
+                    columns.push(QueryColumn {
+                        name: col.name.clone(),
+                        rust_type,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(QueryResult { columns })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,5 +953,116 @@ mod tests {
         assert_eq!(result.columns[1].rust_type, RustType::String);
         // p.id - NOT nullable
         assert_eq!(result.columns[2].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_update_simple() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "UPDATE users SET name = 'Alice'").unwrap();
+
+        // No RETURNING clause - empty result
+        assert_eq!(result.columns.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_update_with_where() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2").unwrap();
+
+        assert_eq!(result.columns.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_update_returning() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "UPDATE users SET name = $1 WHERE id = $2 RETURNING id, name",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_update_returning_all() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "UPDATE users SET name = $1 WHERE id = $2 RETURNING *")
+                .unwrap();
+
+        assert_eq!(result.columns.len(), 4); // id, name, email, metadata
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[2].name, "email");
+        assert_eq!(result.columns[3].name, "metadata");
+    }
+
+    #[test]
+    fn test_validate_update_unknown_column() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "UPDATE users SET nonexistent = 'value'");
+
+        assert!(matches!(result, Err(Error::UnknownColumn { .. })));
+    }
+
+    #[test]
+    fn test_validate_update_unknown_table() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "UPDATE nonexistent SET name = 'value'");
+
+        assert!(matches!(result, Err(Error::UnknownTable(_))));
+    }
+
+    #[test]
+    fn test_validate_delete_simple() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "DELETE FROM users").unwrap();
+
+        // No RETURNING clause - empty result
+        assert_eq!(result.columns.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_delete_with_where() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "DELETE FROM users WHERE id = $1").unwrap();
+
+        assert_eq!(result.columns.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_delete_returning() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "DELETE FROM users WHERE id = $1 RETURNING id, name").unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "name");
+        assert_eq!(result.columns[1].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_delete_returning_all() {
+        let schema = test_schema();
+        let result =
+            validate_query(&schema, "DELETE FROM users WHERE id = $1 RETURNING *").unwrap();
+
+        assert_eq!(result.columns.len(), 4); // id, name, email, metadata
+    }
+
+    #[test]
+    fn test_validate_delete_unknown_table() {
+        let schema = test_schema();
+        let result = validate_query(&schema, "DELETE FROM nonexistent WHERE id = $1");
+
+        assert!(matches!(result, Err(Error::UnknownTable(_))));
     }
 }
