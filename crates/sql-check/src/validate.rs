@@ -786,7 +786,7 @@ fn validate_update(schema: &Schema, update: &Update) -> Result<QueryResult> {
         ctx.table_aliases
             .insert(table_name.to_lowercase(), table_name.clone());
 
-        return infer_returning_types(schema, &ctx, &table, returning);
+        return infer_returning_types(schema, &ctx, table, returning);
     }
 
     // No RETURNING - return empty result
@@ -809,7 +809,7 @@ fn validate_delete(schema: &Schema, delete: &Delete) -> Result<QueryResult> {
         ctx.table_aliases
             .insert(table_name.to_lowercase(), table_name.clone());
 
-        return infer_returning_types(schema, &ctx, &table, returning);
+        return infer_returning_types(schema, &ctx, table, returning);
     }
 
     // No RETURNING - return empty result
