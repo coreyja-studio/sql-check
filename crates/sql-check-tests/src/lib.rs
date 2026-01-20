@@ -8,14 +8,13 @@
 //! - Ignored tests (no compile): Commented out because they fail at compile time
 //!
 //! Supported statements:
-//! - SELECT (with JOINs, aggregates, subqueries, etc.)
+//! - SELECT (with JOINs, aggregates, subqueries, UNION/INTERSECT/EXCEPT, etc.)
 //! - INSERT (with RETURNING)
 //! - UPDATE (with RETURNING)
 //! - DELETE (with RETURNING)
 //!
 //! Known limitations (tests commented out):
 //! - Window functions: ROW_NUMBER, RANK, etc. not supported
-//! - UNION/INTERSECT/EXCEPT: Set operations not supported
 //! - Array operations: ANY, array overlap not tested
 
 // The query! macro is used in tests below, but clippy doesn't see proc macro usage
@@ -729,15 +728,31 @@ fn test_lpad_rpad() {
 }
 
 // --- UNION / INTERSECT / EXCEPT ---
-// Set operations are not yet supported.
-//
-// #[test]
-// fn test_union() {
-//     let q = query!(
-//         "SELECT id, name FROM users UNION SELECT id, name FROM categories"
-//     );
-//     assert!(q.sql().contains("UNION"));
-// }
+// Set operations are now supported!
+
+#[test]
+fn test_union() {
+    let q = query!("SELECT id, name FROM users UNION SELECT id, name FROM categories");
+    assert!(q.sql().contains("UNION"));
+}
+
+#[test]
+fn test_union_all() {
+    let q = query!("SELECT id, name FROM users UNION ALL SELECT id, name FROM categories");
+    assert!(q.sql().contains("UNION ALL"));
+}
+
+#[test]
+fn test_intersect() {
+    let q = query!("SELECT id FROM users INTERSECT SELECT user_id FROM profiles");
+    assert!(q.sql().contains("INTERSECT"));
+}
+
+#[test]
+fn test_except() {
+    let q = query!("SELECT id FROM users EXCEPT SELECT user_id FROM profiles");
+    assert!(q.sql().contains("EXCEPT"));
+}
 
 // --- RIGHT JOIN / FULL OUTER JOIN / CROSS JOIN ---
 // These join types are not yet tested/implemented.

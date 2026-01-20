@@ -5,8 +5,8 @@ use crate::schema::Schema;
 use crate::types::RustType;
 use sqlparser::ast::{
     AssignmentTarget, Delete, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
-    JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
-    Update, Value,
+    JoinOperator, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor,
+    TableWithJoins, Update, Value,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -124,11 +124,55 @@ fn validate_select(schema: &Schema, query: &Query) -> Result<QueryResult> {
         }
     }
 
-    match query.body.as_ref() {
+    validate_set_expr(schema, query.body.as_ref(), ctx)
+}
+
+/// Validate a SetExpr (handles both simple SELECT and set operations like UNION).
+fn validate_set_expr(
+    schema: &Schema,
+    set_expr: &SetExpr,
+    ctx: ResolveContext,
+) -> Result<QueryResult> {
+    match set_expr {
         SetExpr::Select(select) => validate_select_body_with_ctx(schema, select, ctx),
+        SetExpr::SetOperation {
+            op,
+            left,
+            right,
+            set_quantifier: _,
+        } => {
+            // Validate both sides of the set operation
+            let left_result = validate_set_expr(schema, left, ResolveContext::default())?;
+            let right_result = validate_set_expr(schema, right, ResolveContext::default())?;
+
+            // Verify column counts match
+            if left_result.columns.len() != right_result.columns.len() {
+                return Err(Error::InvalidQuery(format!(
+                    "{} requires both sides to have the same number of columns (left: {}, right: {})",
+                    set_op_name(op),
+                    left_result.columns.len(),
+                    right_result.columns.len()
+                )));
+            }
+
+            // Use the left side's column names and types (PostgreSQL behavior)
+            // In PostgreSQL, the first SELECT's column names are used for the result
+            Ok(left_result)
+        }
+        SetExpr::Query(subquery) => validate_select(schema, subquery),
         _ => Err(Error::InvalidQuery(
-            "Only simple SELECT queries are supported".to_string(),
+            "Only SELECT and set operations (UNION/INTERSECT/EXCEPT) are supported".to_string(),
         )),
+    }
+}
+
+/// Get the name of a set operation for error messages.
+fn set_op_name(op: &SetOperator) -> &'static str {
+    match op {
+        SetOperator::Union => "UNION",
+        SetOperator::Intersect => "INTERSECT",
+        SetOperator::Except => "EXCEPT",
+        SetOperator::Minus => "MINUS", // Oracle/DB2 equivalent of EXCEPT
     }
 }
 
@@ -1762,5 +1806,132 @@ mod tests {
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "pos");
         assert_eq!(result.columns[0].rust_type, RustType::I32);
+    }
+
+    // Set operation tests (UNION/INTERSECT/EXCEPT)
+
+    #[test]
+    fn test_validate_union() {
+        let schema = test_schema();
+        // Use columns that exist in both tables (id is uuid in both)
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM users UNION SELECT id FROM profiles",
+        )
+        .unwrap();
+
+        // Result uses column names from left side
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_union_with_different_column_names() {
+        let schema = test_schema();
+        // Test that result uses left side's column names
+        let result = validate_query(
+            &schema,
+            "SELECT name FROM users UNION SELECT bio FROM profiles",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        // Column name from left side (users.name)
+        assert_eq!(result.columns[0].name, "name");
+        assert_eq!(result.columns[0].rust_type, RustType::String);
+    }
+
+    #[test]
+    fn test_validate_union_all() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM users UNION ALL SELECT id FROM profiles",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+    }
+
+    #[test]
+    fn test_validate_intersect() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM users INTERSECT SELECT id FROM profiles",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_except() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM users EXCEPT SELECT id FROM profiles",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_union_column_count_mismatch() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            "SELECT id, name FROM users UNION SELECT id FROM profiles",
+        );
+
+        assert!(matches!(result, Err(Error::InvalidQuery(_))));
+        if let Err(Error::InvalidQuery(msg)) = result {
+            assert!(msg.contains("UNION"));
+            assert!(msg.contains("same number of columns"));
+        }
+    }
+
+    #[test]
+    fn test_validate_multiple_unions() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT id FROM users
+            UNION
+            SELECT id FROM profiles
+            UNION
+            SELECT user_id FROM profiles
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+    }
+
+    #[test]
+    fn test_validate_union_with_where() {
+        let schema = test_schema();
+        let result = validate_query(
+            &schema,
+            r#"
+            SELECT id, name FROM users WHERE name = 'Alice'
+            UNION
+            SELECT id, bio FROM profiles WHERE bio IS NOT NULL
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[1].name, "name");
     }
 }
