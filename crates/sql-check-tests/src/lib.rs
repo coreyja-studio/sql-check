@@ -128,20 +128,20 @@ fn test_count_star() {
     assert!(q.sql().contains("COUNT(*)"));
 }
 
-// SUM/AVG on any column return Decimal, so these tests are commented out
-// until Decimal support is added via feature flag.
-//
-// #[test]
-// fn test_sum_aggregate() {
-//     let q = query!("SELECT SUM(quantity) as total FROM order_items");
-//     assert!(q.sql().contains("SUM"));
-// }
-//
-// #[test]
-// fn test_avg_aggregate() {
-//     let q = query!("SELECT AVG(quantity) as avg_qty FROM order_items");
-//     assert!(q.sql().contains("AVG"));
-// }
+// SUM/AVG on any column return Decimal (Option<rust_decimal::Decimal>).
+// This works now that rust_decimal is enabled with db-tokio-postgres feature.
+
+#[test]
+fn test_sum_aggregate() {
+    let q = query!("SELECT SUM(quantity) as total FROM order_items");
+    assert!(q.sql().contains("SUM"));
+}
+
+#[test]
+fn test_avg_aggregate() {
+    let q = query!("SELECT AVG(quantity) as avg_qty FROM order_items");
+    assert!(q.sql().contains("AVG"));
+}
 
 // MIN/MAX on text columns return Option<String> which works
 #[test]
@@ -736,13 +736,28 @@ fn test_select_all_decimal_columns() {
 }
 
 // --- SUM/AVG aggregates ---
-// SUM and AVG always return Decimal, even on integer columns.
-//
-// #[test]
-// fn test_sum_integer() {
-//     let q = query!("SELECT SUM(quantity) FROM order_items");
-//     assert!(q.sql().contains("SUM"));
-// }
+// SUM and AVG always return Decimal (Option<rust_decimal::Decimal>), even on integer columns.
+
+#[test]
+fn test_sum_integer() {
+    let q = query!("SELECT SUM(quantity) FROM order_items");
+    assert!(q.sql().contains("SUM"));
+}
+
+#[test]
+fn test_avg_decimal() {
+    // AVG on a Decimal column also returns Option<Decimal>
+    let q = query!("SELECT AVG(price) as avg_price FROM products");
+    assert!(q.sql().contains("AVG"));
+}
+
+#[test]
+fn test_sum_with_group_by() {
+    // SUM with GROUP BY returns Option<Decimal>
+    let q = query!("SELECT order_id, SUM(quantity) as total_qty FROM order_items GROUP BY order_id");
+    assert!(q.sql().contains("SUM"));
+    assert!(q.sql().contains("GROUP BY"));
+}
 
 // --- Array operations ---
 // ANY, array overlap operators not yet tested.
