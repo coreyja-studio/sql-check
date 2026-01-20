@@ -1393,4 +1393,72 @@ mod tests {
 
         assert!(matches!(result, Err(Error::UnknownColumn { .. })));
     }
+
+    // SUM/AVG aggregate tests
+
+    #[test]
+    fn test_validate_sum_returns_decimal() {
+        let schema = Schema::from_sql(
+            r#"
+            CREATE TABLE items (
+                id uuid NOT NULL,
+                quantity integer NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+
+        let result = validate_query(&schema, "SELECT SUM(quantity) FROM items").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        // SUM returns Option<Decimal>
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Decimal))
+        );
+    }
+
+    #[test]
+    fn test_validate_avg_returns_decimal() {
+        let schema = Schema::from_sql(
+            r#"
+            CREATE TABLE items (
+                id uuid NOT NULL,
+                quantity integer NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+
+        let result = validate_query(&schema, "SELECT AVG(quantity) FROM items").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        // AVG returns Option<Decimal>
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Decimal))
+        );
+    }
+
+    #[test]
+    fn test_validate_sum_on_decimal_column() {
+        let schema = Schema::from_sql(
+            r#"
+            CREATE TABLE products (
+                id uuid NOT NULL,
+                price numeric(10,2) NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+
+        let result = validate_query(&schema, "SELECT SUM(price) FROM products").unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        // SUM on Decimal still returns Option<Decimal>
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Option(Box::new(RustType::Decimal))
+        );
+    }
 }
