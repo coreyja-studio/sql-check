@@ -828,14 +828,48 @@ fn test_sum_with_group_by() {
 }
 
 // --- Array operations ---
-// ANY, array overlap operators not yet tested.
-//
-// #[test]
-// fn test_array_any() {
-//     let tag = "electronics".to_string();
-//     let q = query!("SELECT id FROM products WHERE $1 = ANY(tags)", tag);
-//     assert!(q.sql().contains("ANY"));
-// }
+
+#[test]
+fn test_array_any() {
+    let tag = "electronics".to_string();
+    let q = query!("SELECT id FROM products WHERE $1 = ANY(tags)", tag);
+    assert!(q.sql().contains("ANY"));
+}
+
+#[test]
+fn test_array_contains() {
+    // Test the @> (contains) operator
+    let q = query!("SELECT id FROM products WHERE tags @> ARRAY['electronics']");
+    assert!(q.sql().contains("@>"));
+}
+
+#[test]
+fn test_array_overlap() {
+    // Test the && (overlap) operator
+    let q = query!("SELECT id FROM products WHERE tags && ARRAY['electronics', 'gadgets']");
+    assert!(q.sql().contains("&&"));
+}
+
+#[test]
+fn test_array_is_contained_by() {
+    // Test the <@ (is contained by) operator
+    let q = query!("SELECT id FROM products WHERE tags <@ ARRAY['electronics', 'gadgets', 'tech']");
+    assert!(q.sql().contains("<@"));
+}
+
+#[test]
+fn test_select_array_column() {
+    // Selecting an array column should work and return Vec<String>
+    let q = query!("SELECT id, tags FROM products");
+    assert!(q.sql().contains("tags"));
+}
+
+#[test]
+fn test_array_literal_in_select() {
+    // Test selecting an array literal
+    let q = query!("SELECT ARRAY['a', 'b', 'c'] as arr FROM products");
+    assert!(q.sql().contains("ARRAY"));
+}
 
 // --- Date functions ---
 

@@ -35,6 +35,9 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ✅ **CTEs** (WITH clause) with type inference from CTE definitions
 - ✅ **String functions**: UPPER, LOWER, CONCAT, SUBSTRING, LENGTH, TRIM, REPLACE, LPAD/RPAD, SPLIT_PART, etc.
 - ✅ **Date/time functions**: EXTRACT, DATE_TRUNC, DATE_PART, TO_CHAR, NOW
+- ✅ **Set operations**: UNION, UNION ALL, INTERSECT, EXCEPT
+- ✅ **Array operations**: ANY, array contains (`@>`), array overlap (`&&`), array is-contained-by (`<@`)
+- ✅ **Array columns**: `text[]`, `integer[]`, etc. mapped to `Vec<T>`
 
 ### Known Limitations
 
@@ -42,8 +45,6 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ❌ **SUM/AVG aggregates** - always return Decimal
 - ❌ **Window functions** (ROW_NUMBER, RANK, LAG, LEAD, etc.)
 - ❌ **AGE function** - returns interval which needs custom FromSql implementation
-- ❌ **UNION**, **INTERSECT**, **EXCEPT**
-- ❌ **Array operations** (ANY, array overlap)
 
 ## Usage
 
