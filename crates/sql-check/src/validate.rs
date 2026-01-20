@@ -4,9 +4,9 @@ use crate::error::{Error, Result};
 use crate::schema::Schema;
 use crate::types::RustType;
 use sqlparser::ast::{
-    AssignmentTarget, Delete, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
-    JoinOperator, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableFactor,
-    TableWithJoins, Update, Value,
+    AssignmentTarget, BinaryOperator, Delete, Expr, FromTable, FunctionArg, FunctionArgExpr,
+    FunctionArguments, JoinOperator, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
+    TableFactor, TableWithJoins, Update, Value,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -621,9 +621,39 @@ fn infer_expr_type(
             let (name, _) = infer_expr_type(schema, ctx, expr)?;
             Ok((name, rust_type))
         }
-        Expr::BinaryOp { left, .. } => {
-            // For binary ops, infer from left side (simplification)
-            infer_expr_type(schema, ctx, left)
+        Expr::BinaryOp { left, op, .. } => {
+            // Handle array operators specifically - they return boolean
+            match op {
+                BinaryOperator::AtArrow       // @> (array contains)
+                | BinaryOperator::ArrowAt     // <@ (array is contained by)
+                | BinaryOperator::PGOverlap   // && (array overlap)
+                => {
+                    // These operators return boolean
+                    Ok(("?column?".to_string(), RustType::Bool))
+                }
+                _ => {
+                    // For other binary ops, infer from left side (simplification)
+                    infer_expr_type(schema, ctx, left)
+                }
+            }
+        }
+        Expr::AnyOp { .. } | Expr::AllOp { .. } => {
+            // ANY/ALL comparisons (e.g., $1 = ANY(tags)) return boolean
+            Ok(("?column?".to_string(), RustType::Bool))
+        }
+        Expr::Array(array) => {
+            // Array literal - infer element type from first element
+            if let Some(first_elem) = array.elem.first() {
+                let (_, elem_type) = infer_expr_type(schema, ctx, first_elem)?;
+                Ok(("?column?".to_string(), RustType::Vec(Box::new(elem_type))))
+            } else {
+                // Empty array - default to Vec<String>
+                Ok(("?column?".to_string(), RustType::Vec(Box::new(RustType::String))))
+            }
+        }
+        Expr::InList { .. } => {
+            // IN expressions return boolean
+            Ok(("?column?".to_string(), RustType::Bool))
         }
         Expr::Nested(inner) => {
             // Parenthesized expression
@@ -1927,6 +1957,131 @@ mod tests {
             UNION
             SELECT id, bio FROM profiles WHERE bio IS NOT NULL
             "#,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[1].name, "name");
+    }
+
+    // Array operations tests
+
+    fn test_schema_with_arrays() -> Schema {
+        Schema::from_sql(
+            r#"
+            CREATE TABLE products (
+                id uuid NOT NULL,
+                name text NOT NULL,
+                tags text[],
+                CONSTRAINT products_pkey PRIMARY KEY (id)
+            );
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_validate_any_operator() {
+        let schema = test_schema_with_arrays();
+        // $1 = ANY(tags) returns boolean, but we're selecting id
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM products WHERE $1 = ANY(tags)",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_array_contains_operator() {
+        let schema = test_schema_with_arrays();
+        // tags @> ARRAY['a'] returns boolean
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM products WHERE tags @> ARRAY['electronics']",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_array_overlap_operator() {
+        let schema = test_schema_with_arrays();
+        // tags && ARRAY['a', 'b'] returns boolean
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM products WHERE tags && ARRAY['a', 'b']",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_array_is_contained_by_operator() {
+        let schema = test_schema_with_arrays();
+        // tags <@ ARRAY['a', 'b', 'c'] returns boolean
+        let result = validate_query(
+            &schema,
+            "SELECT id FROM products WHERE tags <@ ARRAY['a', 'b', 'c']",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+    }
+
+    #[test]
+    fn test_validate_select_array_column() {
+        let schema = test_schema_with_arrays();
+        let result = validate_query(&schema, "SELECT id, tags FROM products").unwrap();
+
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(result.columns[0].name, "id");
+        assert_eq!(result.columns[0].rust_type, RustType::Uuid);
+        assert_eq!(result.columns[1].name, "tags");
+        // tags is nullable (no NOT NULL) and is text[]
+        assert_eq!(
+            result.columns[1].rust_type,
+            RustType::Option(Box::new(RustType::Vec(Box::new(RustType::String))))
+        );
+    }
+
+    #[test]
+    fn test_validate_array_literal() {
+        let schema = test_schema();
+        // Test selecting an array literal
+        let result = validate_query(
+            &schema,
+            "SELECT ARRAY['a', 'b', 'c'] as arr FROM users",
+        )
+        .unwrap();
+
+        assert_eq!(result.columns.len(), 1);
+        assert_eq!(result.columns[0].name, "arr");
+        assert_eq!(
+            result.columns[0].rust_type,
+            RustType::Vec(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn test_validate_any_with_subquery() {
+        // ANY can also work with subqueries, though this tests the basic case
+        let schema = test_schema_with_arrays();
+        let result = validate_query(
+            &schema,
+            "SELECT id, name FROM products WHERE 'electronics' = ANY(tags)",
         )
         .unwrap();
 
