@@ -648,7 +648,10 @@ fn infer_expr_type(
                 Ok(("?column?".to_string(), RustType::Vec(Box::new(elem_type))))
             } else {
                 // Empty array - default to Vec<String>
-                Ok(("?column?".to_string(), RustType::Vec(Box::new(RustType::String))))
+                Ok((
+                    "?column?".to_string(),
+                    RustType::Vec(Box::new(RustType::String)),
+                ))
             }
         }
         Expr::InList { .. } => {
@@ -1985,11 +1988,8 @@ mod tests {
     fn test_validate_any_operator() {
         let schema = test_schema_with_arrays();
         // $1 = ANY(tags) returns boolean, but we're selecting id
-        let result = validate_query(
-            &schema,
-            "SELECT id FROM products WHERE $1 = ANY(tags)",
-        )
-        .unwrap();
+        let result =
+            validate_query(&schema, "SELECT id FROM products WHERE $1 = ANY(tags)").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "id");
@@ -2061,11 +2061,8 @@ mod tests {
     fn test_validate_array_literal() {
         let schema = test_schema();
         // Test selecting an array literal
-        let result = validate_query(
-            &schema,
-            "SELECT ARRAY['a', 'b', 'c'] as arr FROM users",
-        )
-        .unwrap();
+        let result =
+            validate_query(&schema, "SELECT ARRAY['a', 'b', 'c'] as arr FROM users").unwrap();
 
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].name, "arr");
