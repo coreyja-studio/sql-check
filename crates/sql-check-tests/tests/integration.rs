@@ -989,11 +989,214 @@ async fn test_cross_join() {
 // --- SUM/AVG aggregates ---
 // SUM and AVG always return Decimal, even on integer columns.
 
-// --- Window functions ---
-// ROW_NUMBER(), RANK(), LAG(), LEAD() return unknown types.
-
 // --- String/Date functions ---
 // UPPER(), LOWER(), EXTRACT(), DATE_TRUNC() return unknown types.
 
 // --- UPDATE/DELETE statements ---
 // Only SELECT and INSERT are currently supported.
+
+// ============================================================================
+// Window function tests
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_row_number() {
+    let client = connect().await;
+
+    // Clean up and insert test data
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
+    client.execute("DELETE FROM orders", &[]).await.unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    let user_id = uuid::Uuid::new_v4();
+    client
+        .execute(
+            "INSERT INTO users (id, name, email) VALUES ($1, 'Alice', 'alice-window@test.com')",
+            &[&user_id],
+        )
+        .await
+        .unwrap();
+
+    for i in 0..3 {
+        let order_id = uuid::Uuid::new_v4();
+        let status = format!("status_{}", i);
+        client
+            .execute(
+                "INSERT INTO orders (id, user_id, status) VALUES ($1, $2, $3)",
+                &[&order_id, &user_id, &status],
+            )
+            .await
+            .unwrap();
+    }
+
+    let results =
+        query!("SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) as row_num FROM orders")
+            .fetch_all(&client)
+            .await
+            .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // ROW_NUMBER returns i64
+    let row_nums: Vec<i64> = results.iter().map(|r| r.row_num).collect();
+    assert!(row_nums.contains(&1));
+    assert!(row_nums.contains(&2));
+    assert!(row_nums.contains(&3));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_rank_and_dense_rank() {
+    let client = connect().await;
+
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
+    client.execute("DELETE FROM orders", &[]).await.unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    let user_id = uuid::Uuid::new_v4();
+    client
+        .execute(
+            "INSERT INTO users (id, name, email) VALUES ($1, 'Bob', 'bob-window@test.com')",
+            &[&user_id],
+        )
+        .await
+        .unwrap();
+
+    // Insert orders with same status to test rank ties
+    for i in 0..3 {
+        let order_id = uuid::Uuid::new_v4();
+        let status = if i < 2 { "pending" } else { "shipped" };
+        client
+            .execute(
+                "INSERT INTO orders (id, user_id, status) VALUES ($1, $2, $3)",
+                &[&order_id, &user_id, &status.to_string()],
+            )
+            .await
+            .unwrap();
+    }
+
+    let results = query!(
+        "SELECT id, RANK() OVER (ORDER BY status) as rnk, DENSE_RANK() OVER (ORDER BY status) as drnk FROM orders"
+    )
+    .fetch_all(&client)
+    .await
+    .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // Both return i64
+    for r in &results {
+        let _: i64 = r.rnk;
+        let _: i64 = r.drnk;
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_lag_lead() {
+    let client = connect().await;
+
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
+    client.execute("DELETE FROM orders", &[]).await.unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    let user_id = uuid::Uuid::new_v4();
+    client
+        .execute(
+            "INSERT INTO users (id, name, email) VALUES ($1, 'Carol', 'carol-window@test.com')",
+            &[&user_id],
+        )
+        .await
+        .unwrap();
+
+    for i in 0..3 {
+        let order_id = uuid::Uuid::new_v4();
+        let status = format!("status_{}", i);
+        client
+            .execute(
+                "INSERT INTO orders (id, user_id, status) VALUES ($1, $2, $3)",
+                &[&order_id, &user_id, &status],
+            )
+            .await
+            .unwrap();
+    }
+
+    let results = query!(
+        "SELECT id, LAG(status) OVER (ORDER BY created_at) as prev_status, LEAD(status) OVER (ORDER BY created_at) as next_status FROM orders"
+    )
+    .fetch_all(&client)
+    .await
+    .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // LAG/LEAD return Option<String> since there may be no previous/next row
+    let mut has_null_prev = false;
+    let mut has_null_next = false;
+    for r in &results {
+        if r.prev_status.is_none() {
+            has_null_prev = true;
+        }
+        if r.next_status.is_none() {
+            has_null_next = true;
+        }
+    }
+    // First row has no previous, last row has no next
+    assert!(has_null_prev, "First row should have NULL LAG");
+    assert!(has_null_next, "Last row should have NULL LEAD");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_aggregate_as_window() {
+    let client = connect().await;
+
+    client
+        .execute("DELETE FROM order_items", &[])
+        .await
+        .unwrap();
+    client.execute("DELETE FROM orders", &[]).await.unwrap();
+    client.execute("DELETE FROM profiles", &[]).await.unwrap();
+    client.execute("DELETE FROM users", &[]).await.unwrap();
+
+    let user_id = uuid::Uuid::new_v4();
+    client
+        .execute(
+            "INSERT INTO users (id, name, email) VALUES ($1, 'Dave', 'dave-window@test.com')",
+            &[&user_id],
+        )
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        let order_id = uuid::Uuid::new_v4();
+        client
+            .execute(
+                "INSERT INTO orders (id, user_id, status) VALUES ($1, $2, 'pending')",
+                &[&order_id, &user_id],
+            )
+            .await
+            .unwrap();
+    }
+
+    let results = query!("SELECT id, COUNT(*) OVER () as total_count FROM orders")
+        .fetch_all(&client)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // COUNT as window function returns i64
+    for r in &results {
+        assert_eq!(r.total_count, 3i64);
+    }
+}

@@ -38,12 +38,13 @@ Unlike sqlx which requires a live database connection for compile-time checking,
 - ✅ **Set operations**: UNION, UNION ALL, INTERSECT, EXCEPT
 - ✅ **Array operations**: ANY, array contains (`@>`), array overlap (`&&`), array is-contained-by (`<@`)
 - ✅ **Array columns**: `text[]`, `integer[]`, etc. mapped to `Vec<T>`
+- ✅ **Window functions**: ROW_NUMBER, RANK, DENSE_RANK, NTILE, PERCENT_RANK, CUME_DIST, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE
+- ✅ **Aggregate functions as window functions**: SUM() OVER (...), COUNT() OVER (...), etc.
 
 ### Known Limitations
 
 - ❌ **Subqueries in FROM** - derived tables not yet supported
-- ❌ **SUM/AVG aggregates** - always return Decimal
-- ❌ **Window functions** (ROW_NUMBER, RANK, LAG, LEAD, etc.)
+- ❌ **SUM/AVG aggregates** - always return Decimal (not Option<Decimal>)
 - ❌ **AGE function** - returns interval which needs custom FromSql implementation
 
 ## Usage
@@ -90,7 +91,7 @@ pg_dump --schema-only mydb > schema.sql
 
 ## Test Coverage
 
-### Unit Tests (71 tests)
+### Unit Tests (79+ tests)
 Compile-time validation tests that verify the `query!` macro correctly parses and validates SQL without needing a database.
 
 ### Compile-Fail Tests (6 tests)
@@ -100,7 +101,7 @@ Tests using trybuild to verify that invalid SQL produces proper compile-time err
 - Parameter count mismatches
 - Invalid SQL syntax
 
-### Integration Tests (27 tests)
+### Integration Tests (34 tests)
 Runtime tests against a real PostgreSQL database. Requires:
 ```bash
 # Create test database and load schema
